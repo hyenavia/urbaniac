@@ -1,3 +1,4 @@
+pub mod branding;
 pub mod commands;
 pub mod components;
 pub mod embeds;
@@ -26,6 +27,7 @@ struct Handler {
 impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: Ready) {
         tracing::info!(bot = %ready.user.name, "bot terhubung");
+        ctx.set_activity(Some(ActivityData::custom(branding::BOT_STATUS)));
         let defs = commands::definitions();
         let result = match self.guild_id {
             Some(g) => GuildId::new(g).set_commands(&ctx.http, defs).await.map(|_| ()),

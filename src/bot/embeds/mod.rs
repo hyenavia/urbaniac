@@ -2,38 +2,43 @@ use crate::application::activities::{ActivityOverview, ClaimSummary, RunStatus};
 use crate::application::city::CityOverview;
 use crate::application::inventory::{InventoryLine, InventoryView};
 use crate::application::player::ProfileView;
+use crate::bot::branding;
 use crate::domain::city::{def as project_def, project_cost_bac, ProjectId};
 use crate::domain::economy::{format_bac, npc_buy_price};
 use crate::domain::player::xp_to_next;
 use crate::domain::resources::{find_item, ItemDef};
-use serenity::all::{Colour, CreateEmbed};
-
-const COLOR: u32 = 0x2ecc71;
+use serenity::all::{CreateEmbed, CreateEmbedFooter};
 
 pub fn help() -> CreateEmbed {
-    CreateEmbed::new()
-        .title("Urbaniac — Bantuan")
-        .colour(Colour::new(COLOR))
-        .description(
-            "Urbaniac adalah game ekonomi dan pembangunan kota.\n\n\
+    branding::styled_embed(branding::COLOR_GENERAL)
+        .title(format!("{} — {}", branding::NAME, branding::TAGLINE))
+        .image(branding::banner_url())
+        .description(format!(
+            "*{}*\n\
+             {} adalah game ekonomi dan pembangunan kota.\n\n\
              `/start` — buat profil dan buka menu\n\
              `/help` — tampilkan bantuan ini\n\n\
              Tombol di menu: **Profil**, **Inventory**, **Aktivitas**, **Kota**, **Jual**, **Klaim Pending**.\n\
              Mulai Farming atau Gathering di menu Aktivitas; aktivitas tetap berjalan saat kamu offline. \
              Setelah selesai, tekan **Ambil Reward**, jual hasilnya ke NPC, lalu bangun proyek di menu **Kota**.",
-        )
+            branding::SECONDARY_TAGLINE,
+            branding::NAME,
+        ))
 }
 
 pub fn welcome(p: &ProfileView, created: bool) -> CreateEmbed {
-    let title = if created { "Selamat datang di Urbaniac!" } else { "Selamat datang kembali!" };
-    profile(p).title(title)
+    let title = if created {
+        format!("Selamat datang di {}!", branding::NAME)
+    } else {
+        format!("Selamat datang kembali di {}!", branding::NAME)
+    };
+    profile(p).title(title).image(branding::banner_url())
 }
 
 pub fn profile(p: &ProfileView) -> CreateEmbed {
     let pl = &p.player;
-    let mut e = CreateEmbed::new()
+    let mut e = branding::styled_embed(branding::COLOR_GENERAL)
         .title(format!("Profil {}", pl.username))
-        .colour(Colour::new(COLOR))
         .field(
             "Level",
             format!("{} ({}/{} XP)", pl.level, pl.xp, xp_to_next(pl.level)),
@@ -46,9 +51,10 @@ pub fn profile(p: &ProfileView) -> CreateEmbed {
             format!("{}/{} slot", p.inventory.slots_used, p.inventory.slot_capacity),
             true,
         )
-        .footer(serenity::all::CreateEmbedFooter::new(format!(
-            "Bergabung {}",
-            pl.created_at.format("%d-%m-%Y")
+        .footer(CreateEmbedFooter::new(format!(
+            "Bergabung {} • {}",
+            pl.created_at.format("%d-%m-%Y"),
+            branding::FOOTER
         )));
     if let Some(url) = &pl.avatar_url {
         e = e.thumbnail(url);
@@ -73,9 +79,8 @@ fn fmt_lines(lines: &[InventoryLine], empty: &str) -> String {
 }
 
 pub fn inventory(v: &InventoryView, note: Option<String>) -> CreateEmbed {
-    let mut e = CreateEmbed::new()
+    let mut e = branding::styled_embed(branding::COLOR_INVENTORY)
         .title(format!("Inventory ({}/{} slot)", v.slots_used, v.slot_capacity))
-        .colour(Colour::new(COLOR))
         .field("Item", fmt_lines(&v.lines, "Kosong."), false);
     if !v.pending.is_empty() {
         e = e.field("Pending Claim", fmt_lines(&v.pending, ""), false);
@@ -87,7 +92,7 @@ pub fn inventory(v: &InventoryView, note: Option<String>) -> CreateEmbed {
 }
 
 pub fn notice(title: &str, text: &str) -> CreateEmbed {
-    CreateEmbed::new().title(title).description(text).colour(Colour::new(COLOR))
+    branding::styled_embed(branding::COLOR_SYSTEM).title(title).description(text)
 }
 
 pub fn activities(o: &ActivityOverview, note: Option<String>) -> CreateEmbed {
@@ -124,9 +129,8 @@ pub fn activities(o: &ActivityOverview, note: Option<String>) -> CreateEmbed {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    let mut e = CreateEmbed::new()
+    let mut e = branding::styled_embed(branding::COLOR_ACTIVITIES)
         .title(format!("Aktivitas ({}/{} slot)", o.runs.len(), o.slots_total))
-        .colour(Colour::new(COLOR))
         .field("Slot", lines.join("\n"), false)
         .field("Level", progress, false);
     if let Some(n) = note {
@@ -171,21 +175,19 @@ pub fn sell_prompt(v: &InventoryView) -> CreateEmbed {
         .map(|l| format!("{} × {} — {} / unit", l.item.name, l.quantity, format_bac(npc_buy_price(l.item))))
         .collect::<Vec<_>>()
         .join("\n");
-    CreateEmbed::new()
+    branding::styled_embed(branding::COLOR_ECONOMY)
         .title("Jual ke NPC")
         .description(text)
-        .colour(Colour::new(COLOR))
 }
 
 pub fn sell_item(item: &ItemDef, owned: i64) -> CreateEmbed {
-    CreateEmbed::new()
+    branding::styled_embed(branding::COLOR_ECONOMY)
         .title(format!("Jual {}", item.name))
         .description(format!(
             "Kamu punya **{}**. Harga NPC: {} / unit.",
             owned,
             format_bac(npc_buy_price(item))
         ))
-        .colour(Colour::new(COLOR))
 }
 
 pub fn city(ov: &CityOverview, note: Option<String>) -> CreateEmbed {
@@ -236,9 +238,8 @@ pub fn city(ov: &CityOverview, note: Option<String>) -> CreateEmbed {
         .collect::<Vec<_>>()
         .join("\n\n");
 
-    let mut e = CreateEmbed::new()
+    let mut e = branding::styled_embed(branding::COLOR_INFRASTRUCTURE)
         .title(format!("Kota — {}", ov.stage.name()))
-        .colour(Colour::new(COLOR))
         .field("City Treasury", format_bac(ov.treasury), true)
         .field("Wallet Pribadi", format_bac(ov.wallet_balance), true)
         .field("Fasilitas", facilities, false)
