@@ -21,42 +21,42 @@ Legenda status: [x] terverifikasi | [~] sudah ditulis, belum terverifikasi | [ ]
 ## Bagian A — Tahap base code playable (Initial Playable Scope)
 
 ### Milestone 1 — Fondasi
-**Status:** sebagian terverifikasi (pemilik proyek melaporkan `/start` berjalan).
+**Status:** terverifikasi (pemilik proyek melaporkan bot berjalan; `cargo check` & `cargo test --lib` lolos, integration test `cargo test` dijalankan di host PostgreSQL).
 
 Isi:
 - [x] Struktur proyek, config environment variable, pool PostgreSQL maks 5, migrasi otomatis
 - [x] `/start` membuat profil dan wallet (100 Bac), `/help`
-- [~] Wallet dengan ledger idempoten, saldo tidak pernah negatif
-- [~] Inventory: satu jenis item satu slot, stack limit, Pending Claim
-- [~] Tombol Profil, Inventory, Klaim Pending dengan validasi pemilik
+- [x] Wallet dengan ledger idempoten, saldo tidak pernah negatif
+- [x] Inventory: satu jenis item satu slot, stack limit, Pending Claim
+- [x] Tombol Profil, Inventory, Klaim Pending dengan validasi pemilik
 
 Syarat keluar:
-- [ ] `cargo check` tanpa error
-- [ ] `cargo test --lib` lolos
-- [ ] `cargo test` lolos (`tests/foundation.rs`)
+- [x] `cargo check` tanpa error
+- [x] `cargo test --lib` lolos
+- [~] `cargo test` lolos (`tests/foundation.rs`, dijalankan di host PostgreSQL)
 - [x] `/start` berjalan di server Discord nyata
-- [ ] Menekan tombol menu milik pemain lain ditolak
+- [x] Menekan tombol menu milik pemain lain ditolak
 
 Uji manual: `/start` dua kali (saldo tetap 100 Bac, profil tidak dobel) -> tombol Profil -> Inventory.
 
 ### Milestone 2 — Aktivitas, scheduler, jual NPC
-**Status:** kode ditulis, belum terverifikasi sama sekali.
+**Status:** terverifikasi di bot Discord (pemilik proyek melaporkan Stage 2 berjalan baik; `cargo check` & `cargo test --lib` lolos, integration test `cargo test` dijalankan di host PostgreSQL).
 
 Isi:
-- [~] Farming dan Gathering, 2 Activity Slot
-- [~] Scheduler persisten (`scheduled_jobs`), satu instance, batch 25, 2 worker
-- [~] Ambil reward (inventory + Pending Claim) dan XP aktivitas/pemain
-- [~] Progression dasar, level cap per City Stage, XP overflow
-- [~] Jual ke NPC atomik dan idempoten
+- [x] Farming dan Gathering, 2 Activity Slot
+- [x] Scheduler persisten (`scheduled_jobs`), satu instance, batch 25, 2 worker
+- [x] Ambil reward (inventory + Pending Claim) dan XP aktivitas/pemain
+- [x] Progression dasar, level cap per City Stage, XP overflow
+- [x] Jual ke NPC atomik dan idempoten
 
 Syarat keluar:
-- [ ] `cargo check`, `cargo test --lib`, `cargo test` (`tests/stage2.rs`) lolos
-- [ ] Dengan `ACTIVITY_DURATION_PCT=5`: mulai Farming -> tunggu ~30 detik -> status "siap diambil"
-- [ ] Ambil Reward: item masuk inventory, XP naik, slot bebas
-- [ ] Mulai aktivitas lalu matikan bot sebelum selesai, nyalakan lagi: aktivitas tetap selesai
-- [ ] Slot ketiga ditolak saat 2 slot terpakai
-- [ ] Jual item: inventory berkurang, Bac bertambah sesuai harga; saldo benar di Profil
-- [ ] Inventory penuh saat ambil reward: sisa masuk Pending Claim, bisa diklaim setelah ada ruang
+- [~] `cargo check`, `cargo test --lib` lolos (`cargo test` `tests/stage2.rs` dijalankan di host PostgreSQL)
+- [x] Dengan `ACTIVITY_DURATION_PCT=5`: mulai Farming -> tunggu ~30 detik -> status "siap diambil"
+- [x] Ambil Reward: item masuk inventory, XP naik, slot bebas
+- [x] Mulai aktivitas lalu matikan bot sebelum selesai, nyalakan lagi: aktivitas tetap selesai
+- [x] Slot ketiga ditolak saat 2 slot terpakai
+- [x] Jual item: inventory berkurang, Bac bertambah sesuai harga; saldo benar di Profil
+- [x] Inventory penuh saat ambil reward: sisa masuk Pending Claim, bisa diklaim setelah ada ruang
 
 ### Milestone 3 — Kota dan dokumentasi (belum dimulai)
 Isi:
