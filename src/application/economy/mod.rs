@@ -51,6 +51,26 @@ pub enum SellError {
     Db(#[from] sqlx::Error),
 }
 
+/// Harga jual ke NPC saat ini (memperhitungkan pasar dinamis + bonus Pasar Desa +5%).
+pub async fn sell_unit_price_conn(
+    conn: &mut sqlx::PgConnection,
+    player_id: i64,
+    item: &ItemDef,
+) -> sqlx::Result<Decimal> {
+    let base = market::current_npc_price_conn(conn, item).await?;
+    let bonus = crate::application::city::market_hall_bonus_pct_conn(conn, player_id).await?;
+    if bonus > 0 {
+        Ok((base * Decimal::from(100 + bonus) / Decimal::from(100)).round_dp(2))
+    } else {
+        Ok(base)
+    }
+}
+
+pub async fn sell_unit_price(pool: &PgPool, player_id: i64, item: &ItemDef) -> anyhow::Result<Decimal> {
+    let mut conn = pool.acquire().await?;
+    Ok(sell_unit_price_conn(&mut *conn, player_id, item).await?)
+}
+
 /// Jual item ke NPC. Pengurangan item dan kredit Bac terjadi dalam satu transaksi.
 /// `idempotency_key` harus unik per permintaan jual (mis. ID interaksi Discord).
 pub async fn sell_to_npc(
@@ -75,7 +95,7 @@ pub async fn sell_to_npc(
         return Err(SellError::NotEnough { have });
     }
     inventory_repo::remove_item(&mut *tx, player_id, item.id, qty).await?;
-    let unit_price = market::current_npc_price_conn(&mut *tx, item).await?;
+    let unit_price = sell_unit_price_conn(&mut *tx, player_id, item).await?;
     market_repo::record_sale_volume(&mut *tx, item.id, qty).await?;
     let total = unit_price * Decimal::from(qty);
     let reason = format!("npc_sale:{}x{}", item.id, qty);

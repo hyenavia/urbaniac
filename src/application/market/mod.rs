@@ -3,7 +3,7 @@ use crate::domain::economy::{format_bac, npc_buy_price};
 use crate::domain::i18n::{item_name, Lang};
 use crate::domain::market::{
     calc_listing_fee, calc_sale_settlement, dynamic_price, next_multiplier, ListingDuration,
-    MARKET_TICK_SECS, MAX_ACTIVE_LISTINGS,
+    MARKET_TICK_SECS, MAX_ACTIVE_LISTINGS, TICKS_PER_CALENDAR_DAY,
 };
 use crate::domain::resources::{find_item, ItemDef, ITEMS};
 use crate::domain::world::{advance_calendar_day, world_price_multiplier, Season, WorldEvent};
@@ -277,14 +277,8 @@ pub async fn expire_listing(
         .await
         .unwrap_or(Lang::En);
     let mut note = match lang {
-        Lang::En => format!(
-            "<@{}> 📦 Broker Listing #{} expired.",
-            listing.player_id, listing.id
-        ),
-        Lang::Id => format!(
-            "<@{}> 📦 Listing Makelar #{} kedaluwarsa.",
-            listing.player_id, listing.id
-        ),
+        Lang::En => format!("📦 Broker Listing #{} expired.", listing.id),
+        Lang::Id => format!("📦 Listing Makelar #{} kedaluwarsa.", listing.id),
     };
     if let Some(item) = find_item(&listing.item_id) {
         let cap = inventory::slot_capacity_conn(conn, listing.player_id).await?;
@@ -294,23 +288,23 @@ pub async fn expire_listing(
         note = if p.pending > 0 {
             match lang {
                 Lang::En => format!(
-                    "<@{}> 📦 Broker Listing **{} × {}** expired. ⚠️ Inventory full — moved to **Pending Claim**!",
-                    listing.player_id, it_name, listing.quantity
+                    "📦 Broker Listing **{} × {}** expired. ⚠️ Inventory full — moved to **Pending Claim**!",
+                    it_name, listing.quantity
                 ),
                 Lang::Id => format!(
-                    "<@{}> 📦 Listing Makelar **{} × {}** kedaluwarsa. ⚠️ Inventory penuh — masuk **Pending Claim**!",
-                    listing.player_id, it_name, listing.quantity
+                    "📦 Listing Makelar **{} × {}** kedaluwarsa. ⚠️ Inventory penuh — masuk **Pending Claim**!",
+                    it_name, listing.quantity
                 ),
             }
         } else {
             match lang {
                 Lang::En => format!(
-                    "<@{}> 📦 Broker Listing **{} × {}** expired and was returned to your inventory.",
-                    listing.player_id, it_name, listing.quantity
+                    "📦 Broker Listing **{} × {}** expired and was returned to your inventory.",
+                    it_name, listing.quantity
                 ),
                 Lang::Id => format!(
-                    "<@{}> 📦 Listing Makelar **{} × {}** kedaluwarsa dan dikembalikan ke inventory.",
-                    listing.player_id, it_name, listing.quantity
+                    "📦 Listing Makelar **{} × {}** kedaluwarsa dan dikembalikan ke inventory.",
+                    it_name, listing.quantity
                 ),
             }
         };
@@ -325,13 +319,14 @@ pub async fn run_market_tick_conn(
     conn: &mut PgConnection,
     fixed_demand_bps: Option<i64>,
 ) -> anyhow::Result<usize> {
-    let notes = run_market_tick_with_notes(conn, fixed_demand_bps).await?;
+    let notes = run_market_tick_with_notes(conn, fixed_demand_bps, fixed_demand_bps.is_none()).await?;
     Ok(notes.len())
 }
 
 async fn run_market_tick_with_notes(
     conn: &mut PgConnection,
     fixed_demand_bps: Option<i64>,
+    advance_day: bool,
 ) -> anyhow::Result<Vec<(i64, String)>> {
     let mut rng = StdRng::from_entropy();
     let cal_row = world_repo::get_calendar(conn).await?;
@@ -341,7 +336,7 @@ async fn run_market_tick_with_notes(
         cal_row.trend_item_id.clone(),
     );
 
-    if fixed_demand_bps.is_none() {
+    if fixed_demand_bps.is_none() && advance_day {
         let (new_day, new_season, season_changed) = advance_calendar_day(cal_row.day, season);
         season = new_season;
         if season_changed || rng.gen_range(0..100) < 30 {
@@ -408,15 +403,13 @@ async fn run_market_tick_with_notes(
             .unwrap_or(&locked.item_id);
         let msg = match lang {
             Lang::En => format!(
-                "<@{}> 💰 Broker Listing **{} × {}** sold! Net **{}** credited to your Wallet.",
-                locked.player_id,
+                "💰 Broker Listing **{} × {}** sold! Net **{}** credited to your Wallet.",
                 item_label,
                 locked.quantity,
                 format_bac(net)
             ),
             Lang::Id => format!(
-                "<@{}> 💰 Listing Makelar **{} × {}** terjual! Bersih **{}** masuk ke Wallet.",
-                locked.player_id,
+                "💰 Listing Makelar **{} × {}** terjual! Bersih **{}** masuk ke Wallet.",
                 item_label,
                 locked.quantity,
                 format_bac(net)
@@ -431,9 +424,11 @@ async fn run_market_tick_with_notes(
 /// Dipanggil oleh scheduler worker untuk `market_tick`. Menjadwalkan tick berikutnya.
 pub async fn handle_market_tick_job(
     conn: &mut PgConnection,
+    tick_ref: i64,
     duration_pct: i64,
 ) -> anyhow::Result<Vec<(i64, String)>> {
-    let notes = run_market_tick_with_notes(conn, None).await?;
+    let advance_day = tick_ref % TICKS_PER_CALENDAR_DAY == 0;
+    let notes = run_market_tick_with_notes(conn, None, advance_day).await?;
     let secs = (MARKET_TICK_SECS * duration_pct.max(1) / 100).max(5);
     let next_ref = market_repo::next_market_tick_ref(conn).await?;
     scheduler::enqueue(conn, JOB_MARKET_TICK, next_ref, Utc::now() + Duration::seconds(secs))

@@ -136,7 +136,7 @@ pub const WELL: ProjectDef = ProjectDef {
     id: ProjectId::Well,
     key: "well",
     name: "Sumur",
-    description: "Sumber air bersih Kampung. Prasyarat Balai Kampung.",
+    description: "Bonus +10% yield Farming & Gathering. Prasyarat Balai Kampung.",
     min_stage: CityStage::Kampung,
     max_level: 1,
     cost_bac_cents: 5_000,
@@ -148,7 +148,7 @@ pub const GRANARY: ProjectDef = ProjectDef {
     id: ProjectId::Granary,
     key: "granary",
     name: "Lumbung",
-    description: "Menambah +4 slot kapasitas inventory per level (maks Lv 5).",
+    description: "Menambah +4 slot tas & +3% yield semua aktivitas per level (maks Lv 5).",
     min_stage: CityStage::Kampung,
     max_level: MAX_GRANARY_LEVEL,
     cost_bac_cents: 8_000,
@@ -160,7 +160,7 @@ pub const TOWN_HALL: ProjectDef = ProjectDef {
     id: ProjectId::TownHall,
     key: "town_hall",
     name: "Balai Kampung",
-    description: "Naikkan kota ke Desa (buka Fishing & cap Lv 20; butuh Sumur & Lumbung).",
+    description: "Naikkan kota ke Desa (buka Fishing, 3 Slot Aktivitas, cap Lv 20; butuh Sumur & Lumbung).",
     min_stage: CityStage::Kampung,
     max_level: 1,
     cost_bac_cents: 15_000,
@@ -172,7 +172,7 @@ pub const MARKET_HALL: ProjectDef = ProjectDef {
     id: ProjectId::MarketHall,
     key: "market_hall",
     name: "Pasar Desa",
-    description: "Pusat niaga Desa. Prasyarat Balai Kota Kecil.",
+    description: "Bonus +5% harga jual ke NPC. Prasyarat Balai Kota Kecil.",
     min_stage: CityStage::Desa,
     max_level: 1,
     cost_bac_cents: 20_000,
@@ -184,7 +184,7 @@ pub const CITY_HALL: ProjectDef = ProjectDef {
     id: ProjectId::CityHall,
     key: "city_hall",
     name: "Balai Kota Kecil",
-    description: "Naikkan kota ke Kota Kecil (buka Mining & cap Lv 30; butuh Pasar Desa).",
+    description: "Naikkan kota ke Kota Kecil (buka Mining, 4 Slot Aktivitas, cap Lv 30; butuh Pasar Desa).",
     min_stage: CityStage::Desa,
     max_level: 1,
     cost_bac_cents: 35_000,
@@ -196,7 +196,7 @@ pub const TRADE_PORT: ProjectDef = ProjectDef {
     id: ProjectId::TradePort,
     key: "trade_port",
     name: "Pelabuhan Dagang",
-    description: "Naikkan kota ke Kota Dagang (cap aktivitas Lv 40).",
+    description: "Naikkan kota ke Kota Dagang (cap Lv 40, 3 Slot Craft, +15% hadiah Pesanan NPC).",
     min_stage: CityStage::KotaKecil,
     max_level: 1,
     cost_bac_cents: 60_000,
@@ -208,7 +208,7 @@ pub const METROPOLIS_TOWER: ProjectDef = ProjectDef {
     id: ProjectId::MetropolisTower,
     key: "metropolis_tower",
     name: "Menara Metropolis",
-    description: "Naikkan kota ke Metropolis (cap aktivitas Lv 50).",
+    description: "Naikkan kota ke Metropolis (cap Lv 50, +15% kecepatan Aktivitas & Craft).",
     min_stage: CityStage::KotaDagang,
     max_level: 1,
     cost_bac_cents: 120_000,
@@ -260,6 +260,10 @@ pub fn effectiveness_from_welfare(welfare: i32) -> i32 {
     50 + (welfare.clamp(0, 100) * 65 / 100)
 }
 
+pub fn yield_bonus_from_effectiveness(effectiveness_pct: i32) -> i64 {
+    ((effectiveness_pct - 100) / 2) as i64
+}
+
 pub fn local_modifier_from_city(stage: CityStage, welfare: i32) -> Decimal {
     let base = match stage {
         CityStage::Kampung => Decimal::new(10_000, 4),
@@ -295,7 +299,7 @@ pub fn settle_city_economy_tick(
         CityStage::KotaDagang => Decimal::new(14_000, 2),
         CityStage::Metropolis => Decimal::new(26_000, 2),
     };
-    let base_tax = stage_base + Decimal::new(500 * facility_count.max(0), 2);
+    let base_tax = stage_base + Decimal::new(800 * facility_count.max(0), 2);
     let tax_pct = tax_rate_pct.clamp(MIN_TAX_RATE, MAX_TAX_RATE);
     let tax_income = (base_tax * Decimal::from(tax_pct) / Decimal::from(10)
         * Decimal::from(welfare.clamp(20, 100))
@@ -306,26 +310,26 @@ pub fn settle_city_economy_tick(
     let crew_salary = Decimal::new(800 * crew_count.max(0), 2);
     let available = (treasury + tax_income).round_dp(2);
     let expense = maintenance + crew_salary;
-    let mood = if tax_pct > 15 {
-        -3
-    } else if tax_pct <= 10 {
-        3
-    } else {
-        0
-    };
 
     let (new_treasury, shortfall, new_welfare) = if available >= expense {
-        (
-            (available - expense).round_dp(2),
-            false,
-            (welfare + 5 + mood).clamp(0, 100),
-        )
+        let next_w = if tax_pct <= 5 {
+            (welfare + 10).clamp(0, 100)
+        } else if tax_pct <= 10 {
+            (welfare + 4).clamp(0, 100)
+        } else if tax_pct <= 15 {
+            if welfare > 80 {
+                (welfare - 3).max(80)
+            } else {
+                (welfare + 2).min(80)
+            }
+        } else if welfare > 55 {
+            (welfare - 5).max(55)
+        } else {
+            welfare.clamp(0, 100)
+        };
+        ((available - expense).round_dp(2), false, next_w)
     } else {
-        (
-            Decimal::ZERO,
-            true,
-            (welfare - 10 + mood).clamp(0, 100),
-        )
+        (Decimal::ZERO, true, (welfare - 10).clamp(0, 100))
     };
 
     let treasury_delta = (new_treasury - treasury).round_dp(2);
@@ -407,5 +411,30 @@ mod tests {
         assert_eq!(empty.new_treasury, Decimal::ZERO);
         assert!(empty.new_welfare < 70);
         assert!(empty.new_effectiveness_pct < effectiveness_from_welfare(70));
+    }
+
+    #[test]
+    fn high_tax_trades_welfare_for_income() {
+        let t15 = settle_city_economy_tick(
+            Decimal::new(10_000, 2),
+            CityStage::Desa,
+            2,
+            1,
+            15,
+            100,
+        );
+        assert!(!t15.shortfall);
+        assert_eq!(t15.new_welfare, 97);
+
+        let t10 = settle_city_economy_tick(
+            Decimal::new(10_000, 2),
+            CityStage::Desa,
+            2,
+            1,
+            10,
+            90,
+        );
+        assert!(t10.new_welfare > 90);
+        assert!(t15.tax_income > t10.tax_income);
     }
 }

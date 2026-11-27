@@ -17,7 +17,7 @@ pub async fn run(ctx: &Context, cmd: &CommandInteraction, app: &AppState) -> any
     let msg = CreateInteractionResponseMessage::new()
         .embed(embeds::welcome(&profile, created, lang))
         .add_file(crate::bot::branding::banner_attachment())
-        .components(components::main_menu(user.id.get(), lang))
+        .components(components::profile_menu(user.id.get(), lang))
         .ephemeral(true);
     cmd.create_response(&ctx.http, CreateInteractionResponse::Message(msg)).await?;
     Ok(())

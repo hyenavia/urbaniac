@@ -198,3 +198,37 @@ pub async fn mark_order_fulfilled(conn: &mut PgConnection, id: i64) -> sqlx::Res
         .await?;
     Ok(())
 }
+
+pub async fn expire_overdue_orders(conn: &mut PgConnection, player_id: i64) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE npc_orders SET status = 'expired'
+         WHERE player_id = $1 AND status = 'active' AND expires_at <= now()",
+    )
+    .bind(player_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+pub async fn newest_active_order_created_at(
+    conn: &mut PgConnection,
+    player_id: i64,
+) -> sqlx::Result<Option<DateTime<Utc>>> {
+    sqlx::query_scalar::<_, Option<DateTime<Utc>>>(
+        "SELECT MAX(created_at) FROM npc_orders WHERE player_id = $1 AND status = 'active'",
+    )
+    .bind(player_id)
+    .fetch_one(&mut *conn)
+    .await
+}
+
+pub async fn expire_all_active_orders(conn: &mut PgConnection, player_id: i64) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE npc_orders SET status = 'expired'
+         WHERE player_id = $1 AND status = 'active'",
+    )
+    .bind(player_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}

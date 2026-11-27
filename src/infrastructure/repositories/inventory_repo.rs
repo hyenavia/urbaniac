@@ -36,7 +36,7 @@ async fn place(
         .fetch_one(&mut *conn)
         .await?;
 
-    let p = plan_add(existing, used, slot_capacity, item.stack_limit, qty);
+    let p = plan_add(existing, used, slot_capacity, qty);
     if p.stored > 0 {
         sqlx::query(
             "INSERT INTO inventory_items (player_id, item_id, quantity) VALUES ($1, $2, $3)
@@ -91,23 +91,27 @@ pub async fn remove_item(
         return Ok(true);
     }
     lock_player(conn, player_id).await?;
-    let res = sqlx::query(
-        "UPDATE inventory_items SET quantity = quantity - $3
-         WHERE player_id = $1 AND item_id = $2 AND quantity >= $3",
-    )
-    .bind(player_id)
-    .bind(item_id)
-    .bind(qty)
-    .execute(&mut *conn)
-    .await?;
-    if res.rows_affected() == 0 {
+    let have = quantity_of(conn, player_id, item_id).await?;
+    if have < qty {
         return Ok(false);
     }
-    sqlx::query("DELETE FROM inventory_items WHERE player_id = $1 AND item_id = $2 AND quantity = 0")
+    if have == qty {
+        sqlx::query("DELETE FROM inventory_items WHERE player_id = $1 AND item_id = $2")
+            .bind(player_id)
+            .bind(item_id)
+            .execute(&mut *conn)
+            .await?;
+    } else {
+        sqlx::query(
+            "UPDATE inventory_items SET quantity = quantity - $3
+             WHERE player_id = $1 AND item_id = $2",
+        )
         .bind(player_id)
         .bind(item_id)
+        .bind(qty)
         .execute(&mut *conn)
         .await?;
+    }
     Ok(true)
 }
 

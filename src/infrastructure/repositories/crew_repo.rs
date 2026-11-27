@@ -19,6 +19,15 @@ pub async fn count_crews(conn: &mut PgConnection, player_id: i64) -> sqlx::Resul
         .await
 }
 
+pub async fn count_assigned_crews(conn: &mut PgConnection, player_id: i64) -> sqlx::Result<i64> {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM player_crews WHERE player_id = $1 AND assigned_activity IS NOT NULL",
+    )
+    .bind(player_id)
+    .fetch_one(&mut *conn)
+    .await
+}
+
 pub async fn list_crews(conn: &mut PgConnection, player_id: i64) -> sqlx::Result<Vec<CrewRow>> {
     sqlx::query_as::<_, CrewRow>(
         "SELECT id, player_id, name, rarity, specialty, level, assigned_activity, auto_enabled

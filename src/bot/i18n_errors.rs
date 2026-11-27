@@ -83,6 +83,18 @@ pub fn city_error(err: &CityError, lang: Lang) -> String {
                 format_bac(*have)
             ),
         },
+        CityError::InsufficientTreasury { need, have } => match lang {
+            Lang::En => format!(
+                "Insufficient City Treasury (need {}, have {}).",
+                format_bac(*need),
+                format_bac(*have)
+            ),
+            Lang::Id => format!(
+                "Saldo City Treasury tidak cukup (butuh {}, saldo {}).",
+                format_bac(*need),
+                format_bac(*have)
+            ),
+        },
         CityError::InsufficientItem { name, need, have } => {
             let item = item_name_by_any(name, lang);
             match lang {
@@ -113,6 +125,10 @@ pub fn craft_error(err: &CraftError, lang: Lang) -> String {
             Lang::En => "Unknown recipe.".to_string(),
             Lang::Id => "Resep tidak dikenal.".to_string(),
         },
+        CraftError::InvalidQty => match lang {
+            Lang::En => "Invalid crafting quantity.".to_string(),
+            Lang::Id => "Jumlah crafting tidak valid.".to_string(),
+        },
         CraftError::TooManyCrafts(max) => match lang {
             Lang::En => format!("Maximum of {max} concurrent crafts reached."),
             Lang::Id => format!("Maksimal {max} crafting berjalan bersamaan."),
@@ -135,6 +151,10 @@ pub fn craft_error(err: &CraftError, lang: Lang) -> String {
                 Lang::Id => format!("Item **{item}** kurang untuk pesanan (butuh {need}, punya {have})."),
             }
         }
+        CraftError::OrderRefreshCooldown(secs) => match lang {
+            Lang::En => format!("Order refresh on cooldown — try again in {secs}s."),
+            Lang::Id => format!("Ganti pesanan sedang cooldown — coba lagi dalam {secs}d."),
+        },
         CraftError::Wallet(w) => wallet_error(w, lang),
         CraftError::Db(e) => e.to_string(),
     }
@@ -157,6 +177,10 @@ pub fn crew_error(err: &CrewError, lang: Lang) -> String {
         CrewError::MaxLevel(max) => match lang {
             Lang::En => format!("Crew member is already at max level ({max})."),
             Lang::Id => format!("Kru sudah di level maksimal ({max})."),
+        },
+        CrewError::ActivityLocked(stage) => match lang {
+            Lang::En => format!("This activity unlocks at city stage **{}**.", stage_name(*stage, lang)),
+            Lang::Id => format!("Aktivitas ini terbuka di stage **{}**.", stage_name(*stage, lang)),
         },
         CrewError::InsufficientBac { need, have } => match lang {
             Lang::En => format!(

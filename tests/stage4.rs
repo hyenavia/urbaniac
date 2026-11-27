@@ -32,8 +32,8 @@ async fn broker_rejects_without_mutating_wallet_or_inventory(pool: PgPool) {
     assert!(matches!(err1, Err(MarketError::InsufficientItem { have: 5 })));
     assert_eq!(economy::balance(&pool, 200).await.unwrap(), Decimal::new(10_000, 2));
 
-    // Habiskan wallet sehingga tidak cukup untuk fee 1.00 Bac
-    economy::apply(&pool, 200, Decimal::new(-9_950, 2), "spend", "s1")
+    // Habiskan wallet sehingga tidak cukup untuk fee min 0.50 Bac
+    economy::apply(&pool, 200, Decimal::new(-9_980, 2), "spend", "s1")
         .await
         .unwrap();
     let err2 = market::create_listing(
@@ -59,7 +59,7 @@ async fn broker_listing_sells_on_market_tick_with_fee_and_commission(pool: PgPoo
     inventory_repo::add_item(&mut *tx, 201, wheat, 10, 12).await.unwrap();
     tx.commit().await.unwrap();
 
-    // Target 3.20 Bac/unit, total 32.00 -> fee min 1.00 Bac. Wallet 100 -> 99.00 Bac.
+    // Target 3.20 Bac/unit, total 32.00 -> fee min 0.50 Bac. Wallet 100 -> 99.50 Bac.
     market::create_listing(
         &pool,
         201,
@@ -72,7 +72,7 @@ async fn broker_listing_sells_on_market_tick_with_fee_and_commission(pool: PgPoo
     )
     .await
     .unwrap();
-    assert_eq!(economy::balance(&pool, 201).await.unwrap(), Decimal::new(9_900, 2));
+    assert_eq!(economy::balance(&pool, 201).await.unwrap(), Decimal::new(9_950, 2));
     assert!(inventory::view(&pool, 201).await.unwrap().lines.is_empty());
 
     // Naikkan harga pasar (+800 bps => 1.0800x => 3.24 Bac >= target 3.20 Bac)
@@ -81,8 +81,8 @@ async fn broker_listing_sells_on_market_tick_with_fee_and_commission(pool: PgPoo
     tx.commit().await.unwrap();
     assert_eq!(sold, 1);
 
-    // Gross 32.40, komisi 5% = 1.62, net = 30.78 -> Wallet 99.00 + 30.78 = 129.78 Bac
-    assert_eq!(economy::balance(&pool, 201).await.unwrap(), Decimal::new(12_978, 2));
+    // Gross 32.40, komisi 3% = 0.97, net = 31.43 -> Wallet 99.50 + 31.43 = 130.93 Bac
+    assert_eq!(economy::balance(&pool, 201).await.unwrap(), Decimal::new(13_093, 2));
     assert!(market::overview(&pool, 201).await.unwrap().listings.is_empty());
 }
 

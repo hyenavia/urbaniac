@@ -1,6 +1,6 @@
 //! Scheduler tunggal + worker ber-batas. Tidak ada timer per aktivitas dan tidak ada polling rapat:
 //! scheduler tidur sampai job berikutnya jatuh tempo (atau dibangunkan lewat Notify).
-use crate::application::{activities, city, crafting, market, server};
+use crate::application::{activities, city, crafting, market};
 use crate::infrastructure::scheduler::{self, DueJob};
 use chrono::Utc;
 use serenity::all::{Http, UserId};
@@ -44,7 +44,6 @@ async fn run_job(
     if !scheduler::lock_pending(&mut *tx, job.id).await? {
         return Ok(());
     }
-    let mut giveaway_result = None;
     let notes = match job.kind.as_str() {
         activities::JOB_ACTIVITY_COMPLETE => {
             activities::complete_run(&mut *tx, job.ref_id, duration_pct)
@@ -74,20 +73,14 @@ async fn run_job(
                 .collect()
         }
         market::JOB_MARKET_TICK => {
-            market::handle_market_tick_job(&mut *tx, duration_pct).await?
+            market::handle_market_tick_job(&mut *tx, job.ref_id, duration_pct).await?
         }
-        server::JOB_GIVEAWAY_END => {
-            giveaway_result = server::finalize_giveaway_conn(&mut *tx, job.ref_id).await?;
-            Vec::new()
-        }
+        "giveaway_end" => Vec::new(),
         other => anyhow::bail!("jenis job tidak dikenal: {other}"),
     };
     scheduler::mark_done(&mut *tx, job.id).await?;
     tx.commit().await?;
     send_notifications(http_slot, notes).await;
-    if let (Some(res), Some(http)) = (giveaway_result, http_slot.get()) {
-        crate::bot::server_ui::publish_giveaway_result(http, &res).await;
-    }
     Ok(())
 }
 

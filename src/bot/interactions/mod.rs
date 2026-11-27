@@ -1,16 +1,15 @@
 use crate::application::economy::{self, SaleOutcome, SellError, SellQty};
-use crate::application::server::{self, EnterOutcome};
 use crate::application::{activities, city, crafting, crew, inventory, market, player};
-use crate::bot::{commands, components, embeds, i18n_errors, server_ui, AppState};
+use crate::bot::{commands, components, embeds, i18n_errors, AppState};
 use crate::domain::activities::ActivityKind;
 use crate::domain::city::ProjectId;
+use crate::domain::crafting::{find_recipe, max_craftable_batches};
 use crate::domain::economy::format_bac;
 use crate::domain::i18n::{
     activity_name, item_name, project_name, recipe_name, Lang,
 };
-use crate::domain::market::{calc_listing_fee, ListingDuration};
+use crate::domain::market::{calc_listing_fee, calc_sale_settlement, ListingDuration};
 use crate::domain::resources::find_item;
-use crate::infrastructure::repositories::server_repo::WelcomeConfig;
 use rust_decimal::Decimal;
 use serenity::all::*;
 use std::collections::HashMap;
@@ -24,10 +23,6 @@ pub async fn handle_command(
         "start" => commands::start::run(ctx, cmd, app).await,
         "help" => commands::help::run(ctx, cmd, app).await,
         "host" => commands::host::run(ctx, cmd, app).await,
-        "welcome" => commands::welcome::run(ctx, cmd, app).await,
-        "announce" => commands::announce::run(ctx, cmd, app).await,
-        "giveaway" => commands::giveaway::run_giveaway(ctx, cmd, app).await,
-        "cash-giveaway" => commands::giveaway::run_cash_giveaway(ctx, cmd, app).await,
         other => {
             tracing::warn!(command = other, "command tidak dikenal");
             Ok(())
@@ -65,9 +60,23 @@ async fn show_activities(
         ctx,
         c,
         embeds::activities(&ov, note, lang),
-        components::activity_menu(id as u64, lang),
+        components::activity_menu(id as u64, ov.stage, lang),
     )
     .await
+}
+
+async fn build_city_view(
+    pool: &sqlx::PgPool,
+    id: i64,
+    lang: Lang,
+    note: Option<String>,
+) -> anyhow::Result<(CreateEmbed, Vec<CreateActionRow>)> {
+    let ov = city::overview(pool, id).await?;
+    let built: Vec<(ProjectId, i32)> = ov.facilities.iter().map(|f| (f.id, f.level)).collect();
+    Ok((
+        embeds::city(&ov, note, lang),
+        components::city_menu(id as u64, ov.stage, &built, lang),
+    ))
 }
 
 async fn show_city(
@@ -78,15 +87,8 @@ async fn show_city(
     lang: Lang,
     note: Option<String>,
 ) -> anyhow::Result<()> {
-    let ov = city::overview(&app.pool, id).await?;
-    let built: Vec<(ProjectId, i32)> = ov.facilities.iter().map(|f| (f.id, f.level)).collect();
-    update(
-        ctx,
-        c,
-        embeds::city(&ov, note, lang),
-        components::city_menu(id as u64, ov.stage, &built, lang),
-    )
-    .await
+    let (embed, rows) = build_city_view(&app.pool, id, lang, note).await?;
+    update(ctx, c, embed, rows).await
 }
 
 async fn show_market(
@@ -108,6 +110,20 @@ async fn show_market(
     .await
 }
 
+async fn build_craft_view(
+    pool: &sqlx::PgPool,
+    id: i64,
+    lang: Lang,
+    note: Option<String>,
+) -> anyhow::Result<(CreateEmbed, Vec<CreateActionRow>)> {
+    let ov = crafting::overview(pool, id).await?;
+    let auto_sell = ov.auto_sell;
+    Ok((
+        embeds::craft(&ov, note, lang),
+        components::craft_menu(id as u64, auto_sell, lang),
+    ))
+}
+
 async fn show_craft(
     ctx: &Context,
     c: &ComponentInteraction,
@@ -116,15 +132,53 @@ async fn show_craft(
     lang: Lang,
     note: Option<String>,
 ) -> anyhow::Result<()> {
-    let ov = crafting::overview(&app.pool, id).await?;
-    let auto_sell = ov.auto_sell;
-    update(
-        ctx,
-        c,
-        embeds::craft(&ov, note, lang),
-        components::craft_menu(id as u64, auto_sell, lang),
+    let (embed, rows) = build_craft_view(&app.pool, id, lang, note).await?;
+    update(ctx, c, embed, rows).await
+}
+
+async fn player_stock(pool: &sqlx::PgPool, id: i64) -> anyhow::Result<HashMap<&'static str, i64>> {
+    let v = inventory::view(pool, id).await?;
+    Ok(v.lines.into_iter().map(|l| (l.item.id, l.quantity)).collect())
+}
+
+async fn run_craft_batch_note(
+    app: &AppState,
+    id: i64,
+    recipe_id: &str,
+    batch_qty: i64,
+    lang: Lang,
+) -> anyhow::Result<String> {
+    match crafting::start_craft_batch(
+        &app.pool,
+        id,
+        recipe_id,
+        batch_qty,
+        app.activity_duration_pct,
     )
     .await
+    {
+        Ok(run) => {
+            app.notify.notify_one();
+            let r_name = recipe_name(run.recipe.id, lang);
+            Ok(match lang {
+                Lang::En => format!(
+                    "Crafting **{} × {}** started — finishes <t:{}:R>.",
+                    r_name,
+                    run.quantity,
+                    run.ends_at.timestamp()
+                ),
+                Lang::Id => format!(
+                    "Crafting **{} × {}** dimulai — selesai <t:{}:R>.",
+                    r_name,
+                    run.quantity,
+                    run.ends_at.timestamp()
+                ),
+            })
+        }
+        Err(crafting::CraftError::Db(e)) => Err(e.into()),
+        Err(crafting::CraftError::Wallet(e)) => Err(e.into()),
+        Err(e) => Ok(i18n_errors::craft_error(&e, lang)),
+    }
 }
 
 async fn show_crew(
@@ -171,7 +225,7 @@ async fn handle_play_button(
     let msg = CreateMessage::new()
         .content(format!("<@{}>", uid.get()))
         .embed(embeds::welcome(&profile, created, lang))
-        .components(components::main_menu(uid.get(), lang));
+        .components(components::profile_menu(uid.get(), lang));
 
     if let Some(tid) = player::get_thread_id(&app.pool, pid).await? {
         let ch = ChannelId::new(tid);
@@ -212,47 +266,6 @@ pub async fn handle_component(
     if action == "play" && owner == 0 {
         return handle_play_button(ctx, c, app).await;
     }
-    if action == "gwjoin" && owner == 0 {
-        let Ok(giveaway_id) = rest.parse::<i64>() else {
-            return Ok(());
-        };
-        return match server::enter_giveaway(&app.pool, giveaway_id, c.user.id.get() as i64).await? {
-            EnterOutcome::Entered { giveaway, total_entries } => {
-                let msg = CreateInteractionResponseMessage::new()
-                    .embed(server_ui::giveaway_active_embed(&giveaway, total_entries))
-                    .components(server_ui::giveaway_join_button(giveaway.id, total_entries, false));
-                c.create_response(&ctx.http, CreateInteractionResponse::UpdateMessage(msg))
-                    .await?;
-                let _ = c
-                    .create_followup(
-                        &ctx.http,
-                        CreateInteractionResponseFollowup::new()
-                            .content(format!("🎉 You've entered **Giveaway #{}**! Good luck!", giveaway.id))
-                            .ephemeral(true),
-                    )
-                    .await;
-                Ok(())
-            }
-            EnterOutcome::AlreadyEntered { total_entries } => {
-                deny(
-                    ctx,
-                    c,
-                    &format!("You are already entered in this giveaway! (Total entries: {total_entries})"),
-                )
-                .await
-            }
-            EnterOutcome::NeedsProfile => {
-                deny(
-                    ctx,
-                    c,
-                    "This Cash giveaway requires an Urbaniac profile first! Click **Play** or run `/start`, then try again.",
-                )
-                .await
-            }
-            EnterOutcome::Ended => deny(ctx, c, "This giveaway has already ended.").await,
-            EnterOutcome::NotFound => deny(ctx, c, "Giveaway not found.").await,
-        };
-    }
     // Validasi pemilik data.
     if c.user.id.get() != owner {
         return deny(
@@ -286,7 +299,7 @@ pub async fn handle_component(
                 ctx,
                 c,
                 embeds::profile(&profile, new_lang),
-                components::main_menu(owner, new_lang),
+                components::profile_menu(owner, new_lang),
             )
             .await
         }
@@ -306,7 +319,7 @@ pub async fn handle_component(
                 ctx,
                 c,
                 embeds::profile(&profile, lang),
-                components::main_menu(owner, lang),
+                components::profile_menu(owner, lang),
             )
             .await
         }
@@ -321,11 +334,13 @@ pub async fn handle_component(
         }
         "inventory" => {
             let v = inventory::view(&app.pool, id).await?;
+            let has_items = !v.lines.is_empty();
+            let has_pending = !v.pending.is_empty();
             update(
                 ctx,
                 c,
                 embeds::inventory(&v, None, lang),
-                components::main_menu(owner, lang),
+                components::inventory_menu(owner, has_items, has_pending, lang),
             )
             .await
         }
@@ -363,11 +378,13 @@ pub async fn handle_component(
                     .join("\n")
             };
             let v = inventory::view(&app.pool, id).await?;
+            let has_items = !v.lines.is_empty();
+            let has_pending = !v.pending.is_empty();
             update(
                 ctx,
                 c,
                 embeds::inventory(&v, Some(note), lang),
-                components::main_menu(owner, lang),
+                components::inventory_menu(owner, has_items, has_pending, lang),
             )
             .await
         }
@@ -418,6 +435,20 @@ pub async fn handle_component(
                 Err(e) => i18n_errors::city_error(&e, lang),
             };
             show_city(ctx, c, app, id, lang, Some(note)).await
+        }
+        "citydepcustom" => {
+            let bal = economy::balance(&app.pool, id).await?;
+            let modal = components::city_deposit_modal(owner, bal, lang);
+            c.create_response(&ctx.http, CreateInteractionResponse::Modal(modal))
+                .await?;
+            Ok(())
+        }
+        "citywdcustom" => {
+            let ov = city::overview(&app.pool, id).await?;
+            let modal = components::city_withdraw_modal(owner, ov.treasury, lang);
+            c.create_response(&ctx.http, CreateInteractionResponse::Modal(modal))
+                .await?;
+            Ok(())
         }
         "citydep" => {
             let Ok(bac) = rest.parse::<i64>() else { return Ok(()) };
@@ -473,8 +504,23 @@ pub async fn handle_component(
                 .await;
             }
             let ov = market::overview(&app.pool, id).await?;
-            let price_map: HashMap<&'static str, Decimal> =
-                ov.prices.iter().map(|p| (p.item.id, p.current_price)).collect();
+            let city_ov = city::overview(&app.pool, id).await?;
+            let has_mh = city_ov
+                .facilities
+                .iter()
+                .any(|f| f.id == ProjectId::MarketHall && f.level > 0);
+            let price_map: HashMap<&'static str, Decimal> = ov
+                .prices
+                .iter()
+                .map(|p| {
+                    let price = if has_mh {
+                        (p.current_price * Decimal::new(105, 2)).round_dp(2)
+                    } else {
+                        p.current_price
+                    };
+                    (p.item.id, price)
+                })
+                .collect();
             let items: Vec<(String, String, i64)> = v
                 .lines
                 .iter()
@@ -501,7 +547,20 @@ pub async fn handle_component(
                 .find(|l| l.item.id == item.id)
                 .map(|l| l.quantity)
                 .unwrap_or(0);
-            let unit_price = market::current_npc_price(&app.pool, item).await?;
+            if owned <= 0 {
+                let (title, msg) = match lang {
+                    Lang::En => ("Sell to NPC", "You no longer have this item in your inventory."),
+                    Lang::Id => ("Jual ke NPC", "Item ini sudah tidak ada di inventory kamu."),
+                };
+                return update(
+                    ctx,
+                    c,
+                    embeds::notice(title, msg),
+                    components::main_menu(owner, lang),
+                )
+                .await;
+            }
+            let unit_price = economy::sell_unit_price(&app.pool, id, item).await?;
             update(
                 ctx,
                 c,
@@ -550,6 +609,13 @@ pub async fn handle_component(
                 .find(|l| l.item.id == item.id)
                 .map(|l| l.quantity)
                 .unwrap_or(0);
+            if owned <= 0 {
+                let msg = match lang {
+                    Lang::En => "You no longer have this item in your inventory.",
+                    Lang::Id => "Item ini sudah tidak ada di inventory kamu.",
+                };
+                return show_market(ctx, c, app, id, lang, Some(msg.to_string())).await;
+            }
             let cur_price = market::current_npc_price(&app.pool, item).await?;
             let it_name = item_name(item.id, lang);
             let (title, body) = match lang {
@@ -582,44 +648,53 @@ pub async fn handle_component(
             let Ok(qty) = qty_s.parse::<i64>() else { return Ok(()) };
             let cur_price = market::current_npc_price(&app.pool, item).await?;
             let p110 = (cur_price * Decimal::new(110, 2)).round_dp(2);
-            let p125 = (cur_price * Decimal::new(125, 2)).round_dp(2);
-            let p140 = (cur_price * Decimal::new(140, 2)).round_dp(2);
+            let p120 = (cur_price * Decimal::new(120, 2)).round_dp(2);
+            let p135 = (cur_price * Decimal::new(135, 2)).round_dp(2);
+            let (_, _, net110) = calc_sale_settlement(p110, qty);
+            let (_, _, net120) = calc_sale_settlement(p120, qty);
+            let (_, _, net135) = calc_sale_settlement(p135, qty);
             let it_name = item_name(item.id, lang);
             let (title, desc) = match lang {
                 Lang::En => (
                     "Choose Target Price & Duration",
                     format!(
                         "Item: **{} × {}**\nCurrent market price: {}/unit\n\n\
-                         • **+10% (1 Hr)**: target {}/unit (fee {})\n\
-                         • **+25% (6 Hrs)**: target {}/unit (fee {})\n\
-                         • **+40% (24 Hrs)**: target {}/unit (fee {})",
+                         • **+10% (2 Hrs)**: target {}/unit (fee {}, net ~{})\n\
+                         • **+20% (6 Hrs)**: target {}/unit (fee {}, net ~{})\n\
+                         • **+35% (24 Hrs)**: target {}/unit (fee {}, net ~{})",
                         it_name,
                         qty,
                         format_bac(cur_price),
                         format_bac(p110),
                         format_bac(calc_listing_fee(p110, qty)),
-                        format_bac(p125),
-                        format_bac(calc_listing_fee(p125, qty)),
-                        format_bac(p140),
-                        format_bac(calc_listing_fee(p140, qty)),
+                        format_bac(net110),
+                        format_bac(p120),
+                        format_bac(calc_listing_fee(p120, qty)),
+                        format_bac(net120),
+                        format_bac(p135),
+                        format_bac(calc_listing_fee(p135, qty)),
+                        format_bac(net135),
                     ),
                 ),
                 Lang::Id => (
                     "Pilih Target Harga & Durasi",
                     format!(
                         "Item: **{} × {}**\nHarga pasar sekarang: {}/unit\n\n\
-                         • **+10% (1 Jam)**: target {}/unit (fee {})\n\
-                         • **+25% (6 Jam)**: target {}/unit (fee {})\n\
-                         • **+40% (24 Jam)**: target {}/unit (fee {})",
+                         • **+10% (2 Jam)**: target {}/unit (fee {}, bersih ~{})\n\
+                         • **+20% (6 Jam)**: target {}/unit (fee {}, bersih ~{})\n\
+                         • **+35% (24 Jam)**: target {}/unit (fee {}, bersih ~{})",
                         it_name,
                         qty,
                         format_bac(cur_price),
                         format_bac(p110),
                         format_bac(calc_listing_fee(p110, qty)),
-                        format_bac(p125),
-                        format_bac(calc_listing_fee(p125, qty)),
-                        format_bac(p140),
-                        format_bac(calc_listing_fee(p140, qty)),
+                        format_bac(net110),
+                        format_bac(p120),
+                        format_bac(calc_listing_fee(p120, qty)),
+                        format_bac(net120),
+                        format_bac(p135),
+                        format_bac(calc_listing_fee(p135, qty)),
+                        format_bac(net135),
                     ),
                 ),
             };
@@ -697,30 +772,48 @@ pub async fn handle_component(
             };
             show_craft(ctx, c, app, id, lang, Some(note.to_string())).await
         }
-        "craftdo" => {
-            let note = match crafting::start_craft(&app.pool, id, rest, app.activity_duration_pct).await {
-                Ok(run) => {
-                    app.notify.notify_one();
-                    let r_name = recipe_name(run.recipe.id, lang);
-                    match lang {
-                        Lang::En => format!(
-                            "Crafting **{} × {}** started — finishes <t:{}:R>.",
-                            r_name,
-                            run.quantity,
-                            run.ends_at.timestamp()
-                        ),
-                        Lang::Id => format!(
-                            "Crafting **{} × {}** dimulai — selesai <t:{}:R>.",
-                            r_name,
-                            run.quantity,
-                            run.ends_at.timestamp()
-                        ),
-                    }
-                }
-                Err(crafting::CraftError::Db(e)) => return Err(e.into()),
-                Err(crafting::CraftError::Wallet(e)) => return Err(e.into()),
-                Err(e) => i18n_errors::craft_error(&e, lang),
+        "craftpick" => {
+            let Some(recipe) = find_recipe(rest) else { return Ok(()) };
+            let stock = player_stock(&app.pool, id).await?;
+            let max_batch = max_craftable_batches(recipe, &stock);
+            update(
+                ctx,
+                c,
+                embeds::craft_item(recipe, &stock, max_batch, lang),
+                components::craft_qty(owner, recipe.id, max_batch, lang),
+            )
+            .await
+        }
+        "craftbatch" => {
+            let Some((recipe_id, qty_s)) = rest.split_once(':') else { return Ok(()) };
+            let Some(recipe) = find_recipe(recipe_id) else { return Ok(()) };
+            let batch_qty = if qty_s == "max" {
+                let stock = player_stock(&app.pool, id).await?;
+                max_craftable_batches(recipe, &stock).max(1)
+            } else {
+                let Ok(q) = qty_s.parse::<i64>() else { return Ok(()) };
+                q
             };
+            let note = run_craft_batch_note(app, id, recipe.id, batch_qty, lang).await?;
+            show_craft(ctx, c, app, id, lang, Some(note)).await
+        }
+        "craftcustom" => {
+            let Some(recipe) = find_recipe(rest) else { return Ok(()) };
+            let stock = player_stock(&app.pool, id).await?;
+            let max_batch = max_craftable_batches(recipe, &stock);
+            let modal = components::craft_custom_modal(
+                owner,
+                recipe.id,
+                recipe_name(recipe.id, lang),
+                max_batch,
+                lang,
+            );
+            c.create_response(&ctx.http, CreateInteractionResponse::Modal(modal))
+                .await?;
+            Ok(())
+        }
+        "craftdo" => {
+            let note = run_craft_batch_note(app, id, rest, 1, lang).await?;
             show_craft(ctx, c, app, id, lang, Some(note)).await
         }
         "orderpick" => {
@@ -798,6 +891,18 @@ pub async fn handle_component(
                         ),
                     }
                 }
+                Err(crafting::CraftError::Db(e)) => return Err(e.into()),
+                Err(crafting::CraftError::Wallet(e)) => return Err(e.into()),
+                Err(e) => i18n_errors::craft_error(&e, lang),
+            };
+            show_craft(ctx, c, app, id, lang, Some(note)).await
+        }
+        "orderrefresh" => {
+            let note = match crafting::refresh_orders(&app.pool, id).await {
+                Ok(()) => match lang {
+                    Lang::En => "Loaded 3 new NPC orders!".to_string(),
+                    Lang::Id => "3 pesanan NPC baru berhasil dimuat!".to_string(),
+                },
                 Err(crafting::CraftError::Db(e)) => return Err(e.into()),
                 Err(crafting::CraftError::Wallet(e)) => return Err(e.into()),
                 Err(e) => i18n_errors::craft_error(&e, lang),
@@ -902,6 +1007,7 @@ pub async fn handle_component(
                 _ => None,
             };
             let Some(crew_id) = picked.and_then(|s| s.parse::<i64>().ok()) else { return Ok(()) };
+            let stage = city::stage_for(&app.pool, id).await?;
             let (title, body) = match lang {
                 Lang::En => ("Choose Activity Assignment", "Select an activity and automation mode for this crew member."),
                 Lang::Id => ("Pilih Tugas Aktivitas", "Pilih aktivitas dan mode otomasi untuk kru ini."),
@@ -910,7 +1016,7 @@ pub async fn handle_component(
                 ctx,
                 c,
                 embeds::notice(title, body),
-                components::crew_assign_activity(owner, crew_id, lang),
+                components::crew_assign_activity(owner, crew_id, stage, lang),
             )
             .await
         }
@@ -926,10 +1032,31 @@ pub async fn handle_component(
                 Ok(cw) => match cw.assigned {
                     Some(a) if cw.auto_enabled => {
                         let a_name = activity_name(a, lang);
-                        match lang {
+                        let mut base = match lang {
                             Lang::En => format!("**{}** assigned to {a_name} (AUTO).", cw.name),
                             Lang::Id => format!("**{}** ditugaskan ke {a_name} (AUTO).", cw.name),
+                        };
+                        if !activities::has_active_kind(&app.pool, id, a).await? {
+                            match activities::start(&app.pool, id, a, app.activity_duration_pct).await {
+                                Ok(run) => {
+                                    app.notify.notify_one();
+                                    let extra = match lang {
+                                        Lang::En => format!(" Started {a_name} automatically — finishes <t:{}:R>.", run.ends_at.timestamp()),
+                                        Lang::Id => format!(" {a_name} langsung dimulai otomatis — selesai <t:{}:R>.", run.ends_at.timestamp()),
+                                    };
+                                    base.push_str(&extra);
+                                }
+                                Err(activities::ActivityError::NoFreeSlot(_)) => {
+                                    let extra = match lang {
+                                        Lang::En => " All Activity Slots are currently busy — AUTO will loop once a slot runs it.",
+                                        Lang::Id => " Semua Slot Aktivitas sedang terpakai — AUTO akan mengulang otomatis setelah slot tersedia.",
+                                    };
+                                    base.push_str(extra);
+                                }
+                                Err(_) => {}
+                            }
                         }
+                        base
                     }
                     Some(a) => {
                         let a_name = activity_name(a, lang);
@@ -1034,6 +1161,19 @@ pub async fn handle_component(
                 .find(|l| l.item.id == item.id)
                 .map(|l| l.quantity)
                 .unwrap_or(0);
+            if owned <= 0 {
+                let (title, msg) = match lang {
+                    Lang::En => ("Sell to NPC", "You no longer have this item in your inventory."),
+                    Lang::Id => ("Jual ke NPC", "Item ini sudah tidak ada di inventory kamu."),
+                };
+                return update(
+                    ctx,
+                    c,
+                    embeds::notice(title, msg),
+                    components::main_menu(owner, lang),
+                )
+                .await;
+            }
             let modal = components::sell_custom_modal(
                 owner,
                 item.id,
@@ -1133,6 +1273,19 @@ async fn reply_modal_ephemeral(
     Ok(())
 }
 
+fn parse_amount_or_max(raw: &str, max_bal: Decimal) -> Option<Decimal> {
+    if raw.eq_ignore_ascii_case("all") || raw.eq_ignore_ascii_case("max") {
+        Some(max_bal)
+    } else {
+        let normalized = if raw.contains(',') && !raw.contains('.') {
+            raw.replace(',', ".")
+        } else {
+            raw.to_string()
+        };
+        normalized.parse::<Decimal>().ok().map(|d| d.round_dp(2))
+    }
+}
+
 pub async fn handle_modal(
     ctx: &Context,
     m: &ModalInteraction,
@@ -1146,6 +1299,118 @@ pub async fn handle_modal(
     }
 
     match action {
+        "citydepmodal" => {
+            let id = owner as i64;
+            let raw = modal_field(m, "amount");
+            let lang = player::get_lang(&app.pool, id).await.unwrap_or(Lang::En);
+            let bal = economy::balance(&app.pool, id).await?;
+            let note = match parse_amount_or_max(raw, bal) {
+                Some(amount) if amount > Decimal::ZERO => {
+                    let key = format!("citydep:{}", m.id.get());
+                    match city::deposit_to_treasury(&app.pool, id, amount, &key).await {
+                        Ok((wallet, treasury)) => match lang {
+                            Lang::En => format!(
+                                "Deposited {} into City Treasury. Treasury: {}, Wallet: {}.",
+                                format_bac(amount),
+                                format_bac(treasury),
+                                format_bac(wallet)
+                            ),
+                            Lang::Id => format!(
+                                "Berhasil setor {} ke City Treasury. Treasury: {}, Wallet: {}.",
+                                format_bac(amount),
+                                format_bac(treasury),
+                                format_bac(wallet)
+                            ),
+                        },
+                        Err(city::CityError::Db(e)) => return Err(e.into()),
+                        Err(city::CityError::Wallet(e)) => return Err(e.into()),
+                        Err(e) => i18n_errors::city_error(&e, lang),
+                    }
+                }
+                _ => match lang {
+                    Lang::En => "Invalid deposit amount. Enter a number greater than 0 (or `max`).".to_string(),
+                    Lang::Id => "Jumlah setoran tidak valid. Masukkan angka lebih dari 0 (atau `max`).".to_string(),
+                },
+            };
+            let (embed, rows) = build_city_view(&app.pool, id, lang, Some(note)).await?;
+            let msg = CreateInteractionResponseMessage::new()
+                .embed(embed)
+                .components(rows);
+            m.create_response(&ctx.http, CreateInteractionResponse::UpdateMessage(msg))
+                .await?;
+            Ok(())
+        }
+        "citywdmodal" => {
+            let id = owner as i64;
+            let raw = modal_field(m, "amount");
+            let lang = player::get_lang(&app.pool, id).await.unwrap_or(Lang::En);
+            let ov = city::overview(&app.pool, id).await?;
+            let note = match parse_amount_or_max(raw, ov.treasury) {
+                Some(amount) if amount > Decimal::ZERO => {
+                    let key = format!("citywd:{}", m.id.get());
+                    match city::withdraw_from_treasury(&app.pool, id, amount, &key).await {
+                        Ok((wallet, treasury)) => match lang {
+                            Lang::En => format!(
+                                "Withdrew {} from City Treasury. Treasury: {}, Wallet: {}.",
+                                format_bac(amount),
+                                format_bac(treasury),
+                                format_bac(wallet)
+                            ),
+                            Lang::Id => format!(
+                                "Berhasil tarik {} dari City Treasury. Treasury: {}, Wallet: {}.",
+                                format_bac(amount),
+                                format_bac(treasury),
+                                format_bac(wallet)
+                            ),
+                        },
+                        Err(city::CityError::Db(e)) => return Err(e.into()),
+                        Err(city::CityError::Wallet(e)) => return Err(e.into()),
+                        Err(e) => i18n_errors::city_error(&e, lang),
+                    }
+                }
+                _ => match lang {
+                    Lang::En => "Invalid withdraw amount. Enter a number greater than 0 (or `max`).".to_string(),
+                    Lang::Id => "Jumlah penarikan tidak valid. Masukkan angka lebih dari 0 (atau `max`).".to_string(),
+                },
+            };
+            let (embed, rows) = build_city_view(&app.pool, id, lang, Some(note)).await?;
+            let msg = CreateInteractionResponseMessage::new()
+                .embed(embed)
+                .components(rows);
+            m.create_response(&ctx.http, CreateInteractionResponse::UpdateMessage(msg))
+                .await?;
+            Ok(())
+        }
+        "craftmodal" => {
+            let id = owner as i64;
+            let recipe_id = rest;
+            let raw_qty = modal_field(m, "qty");
+            let lang = player::get_lang(&app.pool, id).await.unwrap_or(Lang::En);
+            let note = if raw_qty.eq_ignore_ascii_case("max") || raw_qty.eq_ignore_ascii_case("all") {
+                if let Some(recipe) = find_recipe(recipe_id) {
+                    let stock = player_stock(&app.pool, id).await?;
+                    let batch_qty = max_craftable_batches(recipe, &stock).max(1);
+                    run_craft_batch_note(app, id, recipe.id, batch_qty, lang).await?
+                } else {
+                    i18n_errors::craft_error(&crafting::CraftError::UnknownRecipe, lang)
+                }
+            } else {
+                match raw_qty.parse::<i64>() {
+                    Ok(n) if n > 0 => run_craft_batch_note(app, id, recipe_id, n, lang).await?,
+                    _ => match lang {
+                        Lang::En => "Invalid quantity. Enter a whole number greater than 0 (or `max`).".to_string(),
+                        Lang::Id => "Jumlah tidak valid. Masukkan angka bulat lebih dari 0 (atau `max`).".to_string(),
+                    },
+                }
+            };
+            let (embed, rows) = build_craft_view(&app.pool, id, lang, Some(note)).await?;
+            let msg = CreateInteractionResponseMessage::new()
+                .embed(embed)
+                .components(rows);
+            m.create_response(&ctx.http, CreateInteractionResponse::UpdateMessage(msg))
+                .await?;
+            Ok(())
+        }
         "sellmodal" => {
             let item_id = rest;
             let raw_qty = modal_field(m, "qty");
@@ -1205,111 +1470,6 @@ pub async fn handle_modal(
                 .embed(embeds::notice(title, &text))
                 .components(components::main_menu(owner, lang));
             m.create_response(&ctx.http, CreateInteractionResponse::UpdateMessage(msg))
-                .await?;
-            Ok(())
-        }
-        "welcomemodal" => {
-            let Some(guild_id) = m.guild_id else {
-                return reply_modal_ephemeral(ctx, m, "This modal can only be used inside a server.").await;
-            };
-            let mut parts = rest.splitn(2, ':');
-            let (Some(ch_s), Some(role_s)) = (parts.next(), parts.next()) else {
-                return Ok(());
-            };
-            let (Ok(channel_id), Ok(role_id)) = (ch_s.parse::<u64>(), role_s.parse::<u64>()) else {
-                return Ok(());
-            };
-
-            let title = modal_field(m, "title").to_string();
-            let message = modal_field(m, "message").to_string();
-            if title.is_empty() || message.is_empty() {
-                return reply_modal_ephemeral(ctx, m, "Title and message cannot be empty.").await;
-            }
-
-            let cfg = WelcomeConfig {
-                guild_id: guild_id.get() as i64,
-                channel_id: channel_id as i64,
-                auto_role_id: (role_id != 0).then_some(role_id as i64),
-                title,
-                message,
-                enabled: true,
-            };
-            server::save_welcome(&app.pool, &app.welcome_cache, cfg).await?;
-            let role_note = if role_id != 0 {
-                format!("\nAuto-Role: <@&{role_id}>")
-            } else {
-                "\nAuto-Role: None".to_string()
-            };
-            reply_modal_ephemeral(
-                ctx,
-                m,
-                &format!(
-                    "✅ Welcome greet saved for <#{channel_id}>.{role_note}\nRun `/welcome test` to preview it."
-                ),
-            )
-            .await
-        }
-        "announcemodal" => {
-            let mut parts = rest.splitn(3, ':');
-            let (Some(ch_s), Some(role_s), Some(ev_s)) = (parts.next(), parts.next(), parts.next()) else {
-                return Ok(());
-            };
-            let (Ok(channel_id), Ok(role_id)) = (ch_s.parse::<u64>(), role_s.parse::<u64>()) else {
-                return Ok(());
-            };
-            let ping_everyone = ev_s == "1";
-
-            let title = modal_field(m, "title");
-            let body = modal_field(m, "body");
-            let raw_img = modal_field(m, "image_url");
-            if title.is_empty() || body.is_empty() {
-                return reply_modal_ephemeral(ctx, m, "Title and body cannot be empty.").await;
-            }
-            let image_url = if raw_img.is_empty() {
-                None
-            } else if raw_img.starts_with("http://") || raw_img.starts_with("https://") {
-                Some(raw_img)
-            } else {
-                return reply_modal_ephemeral(
-                    ctx,
-                    m,
-                    "Image URL must start with `http://` or `https://`.",
-                )
-                .await;
-            };
-
-            let mut mentions = Vec::new();
-            if ping_everyone {
-                mentions.push("@everyone".to_string());
-            }
-            if role_id != 0 {
-                mentions.push(format!("<@&{role_id}>"));
-            }
-            let content = mentions.join(" ");
-
-            let mut allowed = CreateAllowedMentions::new().everyone(ping_everyone);
-            if role_id != 0 {
-                allowed = allowed.roles([RoleId::new(role_id)]);
-            }
-
-            let author_tag = m
-                .user
-                .global_name
-                .as_deref()
-                .unwrap_or(m.user.name.as_str());
-            let mut msg = CreateMessage::new()
-                .embed(server_ui::announcement_embed(title, body, image_url, author_tag))
-                .allowed_mentions(allowed);
-            if !content.is_empty() {
-                msg = msg.content(content);
-            }
-
-            m.defer_ephemeral(&ctx.http).await?;
-            let reply = match ChannelId::new(channel_id).send_message(&ctx.http, msg).await {
-                Ok(_) => format!("📢 Announcement posted to <#{channel_id}>."),
-                Err(e) => format!("Failed to post announcement to <#{channel_id}>: {e}"),
-            };
-            m.edit_response(&ctx.http, EditInteractionResponse::new().content(reply))
                 .await?;
             Ok(())
         }

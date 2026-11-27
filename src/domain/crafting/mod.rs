@@ -1,7 +1,18 @@
 use rust_decimal::Decimal;
+use std::collections::HashMap;
 
 pub const MAX_CONCURRENT_CRAFTS: i64 = 2;
 pub const MAX_ACTIVE_ORDERS: i64 = 3;
+pub const MAX_CRAFT_BATCH: i64 = 1_000;
+pub const ORDER_REFRESH_COOLDOWN_SECS: i64 = 300;
+pub const ORDER_PLAYER_XP_PER_UNIT: i64 = 20;
+
+pub fn craft_xp_per_unit(tier: RecipeTier) -> i64 {
+    match tier {
+        RecipeTier::Processed => 10,
+        RecipeTier::Finished => 20,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecipeTier {
@@ -119,6 +130,25 @@ pub fn apply_rep_xp(mut level: i32, mut xp: i64, gain: i64) -> (i32, i64) {
     (level, xp)
 }
 
+pub fn batch_duration_secs(base_secs: i64, qty: i64) -> i64 {
+    let q = qty.max(1);
+    if q == 1 {
+        base_secs
+    } else {
+        base_secs + (q - 1) * (base_secs / 4).max(5)
+    }
+}
+
+pub fn max_craftable_batches(recipe: &RecipeDef, stock: &HashMap<&str, i64>) -> i64 {
+    recipe
+        .inputs
+        .iter()
+        .map(|(id, need)| stock.get(id).copied().unwrap_or(0).max(0) / (*need).max(1))
+        .min()
+        .unwrap_or(0)
+        .clamp(0, MAX_CRAFT_BATCH)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,5 +171,26 @@ mod tests {
         assert_eq!(apply_rep_xp(1, 0, 50), (2, 0));
         assert_eq!(apply_rep_xp(1, 10, 55), (2, 15));
         assert_eq!(apply_rep_bonus(Decimal::new(10_000, 2), 3), Decimal::new(10_600, 2));
+    }
+
+    #[test]
+    fn batch_duration_scales_with_discount() {
+        assert_eq!(batch_duration_secs(60, 1), 60);
+        assert_eq!(batch_duration_secs(60, 10), 195);
+        assert_eq!(batch_duration_secs(120, 5), 240);
+    }
+
+    #[test]
+    fn max_craftable_batches_respects_bottleneck_and_cap() {
+        let crate_recipe = find_recipe("wooden_crate").unwrap(); // plank x2, wood x1
+        let mut stock = HashMap::from([("plank", 11_i64), ("wood", 10_i64)]);
+        assert_eq!(max_craftable_batches(crate_recipe, &stock), 5);
+
+        stock.insert("plank", 5_000);
+        stock.insert("wood", 5_000);
+        assert_eq!(max_craftable_batches(crate_recipe, &stock), MAX_CRAFT_BATCH);
+
+        stock.insert("wood", 0);
+        assert_eq!(max_craftable_batches(crate_recipe, &stock), 0);
     }
 }

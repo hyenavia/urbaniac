@@ -1,4 +1,5 @@
 use crate::domain::activities::ActivityKind;
+use crate::domain::city::CityStage;
 use crate::domain::resources::Rarity;
 use rand::Rng;
 use rust_decimal::Decimal;
@@ -80,6 +81,13 @@ const NAMES: &[&str] = &[
 ];
 
 pub fn roll_recruit<R: Rng>(rng: &mut R) -> (&'static str, Rarity, ActivityKind) {
+    roll_recruit_for_stage(CityStage::Metropolis, rng)
+}
+
+pub fn roll_recruit_for_stage<R: Rng>(
+    stage: CityStage,
+    rng: &mut R,
+) -> (&'static str, Rarity, ActivityKind) {
     let name = NAMES[rng.gen_range(0..NAMES.len())];
     let r_roll = rng.gen_range(0..100);
     let rarity = if r_roll < 55 {
@@ -91,13 +99,23 @@ pub fn roll_recruit<R: Rng>(rng: &mut R) -> (&'static str, Rarity, ActivityKind)
     } else {
         Rarity::Epic
     };
-    let spec = ActivityKind::ALL[rng.gen_range(0..ActivityKind::ALL.len())];
+    let unlocked: Vec<ActivityKind> = ActivityKind::ALL
+        .iter()
+        .copied()
+        .filter(|k| k.min_stage() <= stage)
+        .collect();
+    let spec = if unlocked.is_empty() {
+        ActivityKind::Farming
+    } else {
+        unlocked[rng.gen_range(0..unlocked.len())]
+    };
     (name, rarity, spec)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::{rngs::StdRng, SeedableRng};
 
     #[test]
     fn efficiency_reduces_duration_and_specialty_boosts_bonus() {
@@ -106,5 +124,14 @@ mod tests {
         let match_b = crew_bonus(Rarity::Rare, 2, true);
         let off_b = crew_bonus(Rarity::Rare, 2, false);
         assert!(match_b.yield_pct > off_b.yield_pct);
+    }
+
+    #[test]
+    fn recruit_for_kampung_only_rolls_unlocked_activities() {
+        let mut rng = StdRng::seed_from_u64(42);
+        for _ in 0..50 {
+            let (_, _, spec) = roll_recruit_for_stage(CityStage::Kampung, &mut rng);
+            assert!(matches!(spec, ActivityKind::Farming | ActivityKind::Gathering));
+        }
     }
 }

@@ -3,15 +3,16 @@ use crate::application::city::CityOverview;
 use crate::application::crafting::CraftOverview;
 use crate::application::crew::CrewView;
 use crate::application::inventory::{InventoryLine, InventoryView};
-use crate::application::market::MarketOverview;
+use crate::application::market::{MarketOverview, MarketPriceView};
 use crate::application::player::ProfileView;
 use crate::bot::branding;
-use crate::domain::city::{def as project_def, project_cost_bac_for_level, ProjectId};
-use crate::domain::crafting::RECIPES;
+use crate::domain::city::{def as project_def, project_cost_bac_for_level, CityStage, ProjectId};
+use crate::domain::crafting::{batch_duration_secs, RecipeDef, RECIPES};
 use crate::domain::economy::format_bac;
 use crate::domain::i18n::{
-    activity_name, item_name, project_desc, project_name, recipe_name, recipe_tier_name,
-    season_name, stage_era, stage_name, world_event_name, Lang,
+    activity_name, event_bonus_hint, item_name, project_desc, project_name, recipe_name,
+    recipe_tier_name, season_bonus_hint, season_name, stage_era, stage_name, world_event_name,
+    Lang,
 };
 use crate::domain::player::xp_to_next;
 use crate::domain::resources::ItemDef;
@@ -110,12 +111,61 @@ pub fn welcome(p: &ProfileView, created: bool, lang: Lang) -> CreateEmbed {
     profile(p, lang).title(title)
 }
 
+fn next_objective(stage: CityStage, facilities: &[(ProjectId, i32)], lang: Lang) -> &'static str {
+    let has = |id: ProjectId| facilities.iter().any(|(fid, lvl)| *fid == id && *lvl > 0);
+    match stage {
+        CityStage::Kampung => {
+            if !has(ProjectId::Well) {
+                match lang {
+                    Lang::En => "Gather Wood & build **Well** in **City** (+10% Farming & Gathering yield).",
+                    Lang::Id => "Kumpulkan Kayu lalu bangun **Sumur** di menu **Kota** (+10% yield Farming & Gathering).",
+                }
+            } else if !has(ProjectId::Granary) {
+                match lang {
+                    Lang::En => "Build **Granary** in **City** (+4 bag slots & +3% activity yield).",
+                    Lang::Id => "Bangun **Lumbung** di menu **Kota** (+4 slot tas & +3% yield aktivitas).",
+                }
+            } else {
+                match lang {
+                    Lang::En => "Build **Village Hall** to advance to **Village** (unlocks Fishing & 3rd Activity Slot).",
+                    Lang::Id => "Bangun **Balai Kampung** untuk naik ke **Desa** (buka Fishing & 3 Slot Aktivitas).",
+                }
+            }
+        }
+        CityStage::Desa => {
+            if !has(ProjectId::MarketHall) {
+                match lang {
+                    Lang::En => "Craft Planks & Bread, then build **Market Hall** (+5% NPC sell price).",
+                    Lang::Id => "Craft Papan & Roti, lalu bangun **Pasar Desa** (+5% harga jual ke NPC).",
+                }
+            } else {
+                match lang {
+                    Lang::En => "Build **Town Hall** to advance to **Town** (unlocks Mining & 4th Activity Slot).",
+                    Lang::Id => "Bangun **Balai Kota Kecil** untuk naik ke **Kota Kecil** (buka Mining & 4 Slot Aktivitas).",
+                }
+            }
+        }
+        CityStage::KotaKecil => match lang {
+            Lang::En => "Mine Iron Ore & build **Trade Port** (3rd Craft Slot & +15% NPC Order rewards).",
+            Lang::Id => "Mining Bijih Besi & bangun **Pelabuhan Dagang** (3 Slot Craft & +15% hadiah Pesanan NPC).",
+        },
+        CityStage::KotaDagang => match lang {
+            Lang::En => "Gather Amethyst & Herbal Tonic, then build **Metropolis Tower** (+15% Activity & Craft speed).",
+            Lang::Id => "Kumpulkan Kecubung & Tonik Herba, lalu bangun **Menara Metropolis** (+15% kecepatan Aktivitas & Craft).",
+        },
+        CityStage::Metropolis => match lang {
+            Lang::En => "Max out Granary Lv 5, Crew levels, Activity levels (Lv 50), and Shop Reputation!",
+            Lang::Id => "Maksimalkan Lumbung Lv 5, level Kru, level Aktivitas (Lv 50), dan Reputasi Toko!",
+        },
+    }
+}
+
 pub fn profile(p: &ProfileView, lang: Lang) -> CreateEmbed {
     let pl = &p.player;
     let needed = xp_to_next(pl.level);
     let s_name = stage_name(p.city_stage, lang);
     let s_era = stage_era(p.city_stage, lang);
-    let (res_label, prog_label, econ_label, inv_label, loc_label, slots_word) = match lang {
+    let (res_label, prog_label, econ_label, inv_label, loc_label, slots_word, obj_label) = match lang {
         Lang::En => (
             "Resident",
             "Character Progression",
@@ -123,6 +173,7 @@ pub fn profile(p: &ProfileView, lang: Lang) -> CreateEmbed {
             "Inventory",
             "Current Location",
             "Slots",
+            "🎯 Next Objective",
         ),
         Lang::Id => (
             "Warga",
@@ -131,7 +182,13 @@ pub fn profile(p: &ProfileView, lang: Lang) -> CreateEmbed {
             "Inventory",
             "Lokasi Saat Ini",
             "Slot",
+            "🎯 Tujuan Berikutnya",
         ),
+    };
+    let pending_note = if p.inventory.pending.is_empty() {
+        String::new()
+    } else {
+        format!(" (⏳ {} pending)", p.inventory.pending.len())
     };
     let mut e = branding::styled_embed(branding::COLOR_GENERAL)
         .title(format!("👤 {}", pl.username.to_uppercase()))
@@ -140,10 +197,14 @@ pub fn profile(p: &ProfileView, lang: Lang) -> CreateEmbed {
         .field(econ_label, format!("🪙 {}", format_bac(p.balance)), true)
         .field(
             inv_label,
-            format!("🎒 {}/{} {}", p.inventory.slots_used, p.inventory.slot_capacity, slots_word),
+            format!(
+                "🎒 {}/{} {}{}",
+                p.inventory.slots_used, p.inventory.slot_capacity, slots_word, pending_note
+            ),
             true,
         )
-        .field(loc_label, format!("🏘️ {} · {}", s_name, s_era), true);
+        .field(loc_label, format!("🏘️ {} · {}", s_name, s_era), true)
+        .field(obj_label, next_objective(p.city_stage, &p.facilities, lang), false);
     if let Some(url) = &pl.avatar_url {
         e = e.thumbnail(url);
     }
@@ -158,11 +219,10 @@ fn fmt_lines(lines: &[InventoryLine], empty: &str, lang: Lang) -> String {
         .iter()
         .map(|l| {
             format!(
-                "{} **{}** × {} `/{}` · *{}*",
+                "{} **{}** × {} · *{}*",
                 item_icon(l.item.id),
                 item_name(l.item.id, lang),
                 l.quantity,
-                l.item.stack_limit,
                 l.item.rarity
             )
         })
@@ -373,13 +433,11 @@ pub fn sell_item(item: &ItemDef, owned: i64, unit_price: Decimal, lang: Lang) ->
         .description(desc)
 }
 
-pub fn market(ov: &MarketOverview, note: Option<String>, lang: Lang) -> CreateEmbed {
-    let base_word = match lang {
-        Lang::En => "base",
-        Lang::Id => "dasar",
-    };
-    let price_lines = ov
-        .prices
+fn format_price_lines(prices: &[&MarketPriceView], base_word: &str, lang: Lang) -> String {
+    if prices.is_empty() {
+        return "-".to_string();
+    }
+    prices
         .iter()
         .map(|p| {
             let pct = ((p.multiplier - Decimal::ONE) * Decimal::from(100)).round_dp(0);
@@ -399,7 +457,25 @@ pub fn market(ov: &MarketOverview, note: Option<String>, lang: Lang) -> CreateEm
             )
         })
         .collect::<Vec<_>>()
-        .join("\n");
+        .join("\n")
+}
+
+fn split_market_price_fields(prices: &[MarketPriceView], lang: Lang) -> (String, String) {
+    let base_word = match lang {
+        Lang::En => "base",
+        Lang::Id => "dasar",
+    };
+    let is_crafted = |id: &str| RECIPES.iter().any(|r| r.output_item_id == id);
+    let raw: Vec<&MarketPriceView> = prices.iter().filter(|p| !is_crafted(p.item.id)).collect();
+    let crafted: Vec<&MarketPriceView> = prices.iter().filter(|p| is_crafted(p.item.id)).collect();
+    (
+        format_price_lines(&raw, base_word, lang),
+        format_price_lines(&crafted, base_word, lang),
+    )
+}
+
+pub fn market(ov: &MarketOverview, note: Option<String>, lang: Lang) -> CreateEmbed {
+    let (raw_lines, crafted_lines) = split_market_price_fields(&ov.prices, lang);
 
     let listing_lines = if ov.listings.is_empty() {
         match lang {
@@ -444,21 +520,22 @@ pub fn market(ov: &MarketOverview, note: Option<String>, lang: Lang) -> CreateEm
         .trend_item_id
         .map(|id| item_name(id, lang))
         .unwrap_or(none_word);
+    let season_hint = season_bonus_hint(ov.calendar.season, lang);
     let event_label = ov
         .calendar
         .active_event
-        .map(|e| world_event_name(e, lang))
-        .unwrap_or(none_word);
+        .map(|e| format!("{} ({})", world_event_name(e, lang), event_bonus_hint(e, lang)))
+        .unwrap_or_else(|| none_word.to_string());
     let cal_info = match lang {
         Lang::En => format!(
-            "Day **{}** · {} • Event: {} • Trend: {}",
+            "Day **{}** (1 day = 2h) · **{}** *({season_hint})*\nEvent: {} • Trend (+15%): **{}**",
             ov.calendar.day,
             season_name(ov.calendar.season, lang),
             event_label,
             trend_label
         ),
         Lang::Id => format!(
-            "Hari **{}** · {} • Event: {} • Tren: {}",
+            "Hari **{}** (1 hari = 2 jam) · **{}** *({season_hint})*\nEvent: {} • Tren (+15%): **{}**",
             ov.calendar.day,
             season_name(ov.calendar.season, lang),
             event_label,
@@ -466,29 +543,32 @@ pub fn market(ov: &MarketOverview, note: Option<String>, lang: Lang) -> CreateEm
         ),
     };
 
-    let (title, cal_hdr, price_hdr, list_hdr, fee_hdr, fee_val) = match lang {
+    let (title, cal_hdr, raw_hdr, crafted_hdr, list_hdr, fee_hdr, fee_val) = match lang {
         Lang::En => (
             "🏪 Market & Broker (NPC Market)",
             "World Calendar",
-            "Current NPC Market Prices",
+            "Raw & Gathering Prices",
+            "Crafted Goods Prices",
             format!("Active Broker Listings ({}/5)", ov.listings.len()),
             "Broker Fees",
-            "2% Fee (min 1 Bac) + 5% Commission",
+            "1% Fee (min 0.50 Bac) + 3% Commission",
         ),
         Lang::Id => (
             "🏪 Pasar & Makelar (NPC Market)",
             "Kalender Global",
-            "Harga Pasar NPC Saat Ini",
+            "Harga Bahan Mentah",
+            "Harga Barang Olahan",
             format!("Listing Makelar Aktif ({}/5)", ov.listings.len()),
             "Biaya Makelar",
-            "Fee 2% (min 1 Bac) + Komisi 5%",
+            "Fee 1% (min 0.50 Bac) + Komisi 3%",
         ),
     };
 
     let mut e = branding::styled_embed(branding::COLOR_ECONOMY)
         .title(title)
         .field(cal_hdr, cal_info, false)
-        .field(price_hdr, price_lines, false)
+        .field(raw_hdr, raw_lines, false)
+        .field(crafted_hdr, crafted_lines, false)
         .field(list_hdr, listing_lines, false)
         .field("Wallet", format!("🪙 {}", format_bac(ov.wallet_balance)), true)
         .field(fee_hdr, fee_val, true);
@@ -577,14 +657,34 @@ pub fn city(ov: &CityOverview, note: Option<String>, lang: Lang) -> CreateEmbed 
         .collect::<Vec<_>>()
         .join("\n\n");
 
+    let net_cashflow = ov.est_tax_income - ov.est_expense;
+    let net_str = if net_cashflow >= Decimal::ZERO {
+        format!("+{}", format_bac(net_cashflow))
+    } else {
+        format_bac(net_cashflow)
+    };
+    let yield_str = if ov.yield_bonus_pct >= 0 {
+        format!("+{}%", ov.yield_bonus_pct)
+    } else {
+        format!("{}%", ov.yield_bonus_pct)
+    };
+
     let (title, wallet_hdr, econ_hdr, econ_val, fac_hdr, run_hdr, avail_hdr) = match lang {
         Lang::En => (
             format!("🗺️ City — {} ({})", stage_name(ov.stage, lang), stage_era(ov.stage, lang)),
             "Personal Wallet",
             "City Economy",
             format!(
-                "Tax: **{}%** • Welfare: **{}%** • Effectiveness: **{}%** • Mod: **{}x**",
-                ov.tax_rate_pct, ov.welfare, ov.effectiveness_pct, ov.local_modifier
+                "Tax: **{}%** • Welfare: **{}%** • Activity Yield Bonus: **{}**\n\
+                 Cashflow / 30m: +{} (tax) − {} (upkeep, {} active crew) = **{}**\n\
+                 *5%/10% keeps Welfare 100%; 15% boosts tax but lowers Welfare to 80%. Projects spend Treasury first.*",
+                ov.tax_rate_pct,
+                ov.welfare,
+                yield_str,
+                format_bac(ov.est_tax_income),
+                format_bac(ov.est_expense),
+                ov.assigned_crews,
+                net_str,
             ),
             "Installed Facilities",
             "Active Project",
@@ -595,8 +695,16 @@ pub fn city(ov: &CityOverview, note: Option<String>, lang: Lang) -> CreateEmbed 
             "Wallet Pribadi",
             "Ekonomi Kota",
             format!(
-                "Pajak: **{}%** • Welfare: **{}%** • Efektivitas: **{}%** • Mod: **{}x**",
-                ov.tax_rate_pct, ov.welfare, ov.effectiveness_pct, ov.local_modifier
+                "Pajak: **{}%** • Welfare: **{}%** • Bonus Yield Aktivitas: **{}**\n\
+                 Cashflow / 30m: +{} (pajak) − {} (biaya, {} kru aktif) = **{}**\n\
+                 *Pajak 5%/10% jaga Welfare 100%; 15% pajak besar tapi Welfare turun ke 80%. Proyek memakai Treasury dulu.*",
+                ov.tax_rate_pct,
+                ov.welfare,
+                yield_str,
+                format_bac(ov.est_tax_income),
+                format_bac(ov.est_expense),
+                ov.assigned_crews,
+                net_str,
             ),
             "Fasilitas Terpasang",
             "Proyek Berjalan",
@@ -710,7 +818,7 @@ pub fn craft(ov: &CraftOverview, note: Option<String>, lang: Lang) -> CreateEmbe
                 "`LV. {:02}` ({}/{} XP) • Order Bonus +{}% • Completed: {}",
                 ov.rep_level, ov.rep_xp, ov.rep_xp_needed, ov.rep_bonus_pct, ov.completed_orders
             ),
-            "Active Crafting (max 2)",
+            format!("Active Crafting (max {})", ov.max_concurrent),
             "Recipes",
             "Active NPC Orders",
         ),
@@ -721,7 +829,7 @@ pub fn craft(ov: &CraftOverview, note: Option<String>, lang: Lang) -> CreateEmbe
                 "`LV. {:02}` ({}/{} XP) • Bonus Order +{}% • Selesai: {}",
                 ov.rep_level, ov.rep_xp, ov.rep_xp_needed, ov.rep_bonus_pct, ov.completed_orders
             ),
-            "Crafting Berjalan (maks 2)",
+            format!("Crafting Berjalan (maks {})", ov.max_concurrent),
             "Resep",
             "Pesanan NPC Aktif",
         ),
@@ -807,4 +915,99 @@ pub fn crew(crews: &[CrewView], note: Option<String>, lang: Lang) -> CreateEmbed
         e = e.description(n);
     }
     e
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::economy::npc_buy_price;
+    use crate::domain::resources::ITEMS;
+
+    #[test]
+    fn market_price_fields_stay_under_discord_limit() {
+        let mult = Decimal::new(15_000, 4);
+        let views: Vec<MarketPriceView> = ITEMS
+            .iter()
+            .map(|item| {
+                let base = npc_buy_price(item);
+                MarketPriceView {
+                    item,
+                    base_price: base,
+                    current_price: (base * mult).round_dp(2),
+                    multiplier: mult,
+                }
+            })
+            .collect();
+
+        for lang in [Lang::En, Lang::Id] {
+            let (raw, crafted) = split_market_price_fields(&views, lang);
+            assert!(raw.len() <= 1024, "raw price field too long ({}): {}", raw.len(), raw);
+            assert!(
+                crafted.len() <= 1024,
+                "crafted price field too long ({}): {}",
+                crafted.len(),
+                crafted
+            );
+        }
+    }
+}
+
+pub fn craft_item(
+    recipe: &RecipeDef,
+    stock: &HashMap<&str, i64>,
+    max_batch: i64,
+    lang: Lang,
+) -> CreateEmbed {
+    let r_name = recipe_name(recipe.id, lang);
+    let tier = recipe_tier_name(recipe.tier, lang);
+    let sec_unit = match lang {
+        Lang::En => "s",
+        Lang::Id => "d",
+    };
+    let inputs = recipe
+        .inputs
+        .iter()
+        .map(|(id, need)| {
+            let have = stock.get(id).copied().unwrap_or(0);
+            format!(
+                "{} **{}**: {} / {} {}",
+                item_icon(id),
+                item_name(id, lang),
+                have,
+                need,
+                match lang {
+                    Lang::En => "per unit",
+                    Lang::Id => "per unit",
+                }
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let d1 = batch_duration_secs(recipe.duration_secs, 1);
+    let d5 = batch_duration_secs(recipe.duration_secs, 5);
+    let d10 = batch_duration_secs(recipe.duration_secs, 10);
+
+    let (title, ing_hdr, est_hdr, est_val, max_line) = match lang {
+        Lang::En => (
+            format!("{} Craft {} [{}]", item_icon(recipe.output_item_id), r_name, tier),
+            "Required Materials (Owned / Need)",
+            "Batch Craft Duration",
+            format!("×1: **{d1}{sec_unit}** • ×5: **{d5}{sec_unit}** • ×10: **{d10}{sec_unit}**"),
+            format!("Max craftable right now: **{max_batch}**"),
+        ),
+        Lang::Id => (
+            format!("{} Craft {} [{}]", item_icon(recipe.output_item_id), r_name, tier),
+            "Bahan Dibutuhkan (Punya / Butuh)",
+            "Estimasi Durasi Batch",
+            format!("×1: **{d1}{sec_unit}** • ×5: **{d5}{sec_unit}** • ×10: **{d10}{sec_unit}**"),
+            format!("Maksimal bisa dibuat sekarang: **{max_batch}**"),
+        ),
+    };
+
+    branding::styled_embed(branding::COLOR_ECONOMY)
+        .title(title)
+        .description(max_line)
+        .field(ing_hdr, inputs, false)
+        .field(est_hdr, est_val, false)
 }

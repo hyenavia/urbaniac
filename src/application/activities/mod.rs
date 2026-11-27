@@ -1,20 +1,17 @@
-use crate::application::{city, crew, inventory};
+use crate::application::{city, crew, inventory, player};
 use crate::domain::activities::{
-    def, roll_rewards_with_bonus, ActivityKind, BASE_ACTIVITY_SLOTS,
+    activity_slots_for_stage, def, roll_rewards_with_bonus, ActivityKind, BASE_ACTIVITY_SLOTS,
 };
 use crate::domain::city::CityStage;
 use crate::domain::crew::apply_efficiency_duration;
 use crate::domain::i18n::{activity_name, Lang};
 use crate::domain::player::xp_to_next;
-use crate::domain::progression::{activity_level_cap, apply_xp, eligible_rewards, XpState, NO_CAP};
+use crate::domain::progression::{activity_level_cap, apply_xp, XpState};
 use crate::domain::resources::{find_item, ItemDef};
-use crate::infrastructure::repositories::{
-    activity_repo, inventory_repo, player_repo, wallet_repo,
-};
+use crate::infrastructure::repositories::{activity_repo, inventory_repo, player_repo};
 use crate::infrastructure::scheduler;
 use chrono::{DateTime, Utc};
 use rand::{rngs::StdRng, SeedableRng};
-use rust_decimal::Decimal;
 use sqlx::{PgConnection, PgPool};
 
 pub const JOB_ACTIVITY_COMPLETE: &str = "activity_complete";
@@ -53,6 +50,7 @@ pub struct ProgressView {
 }
 
 pub struct ActivityOverview {
+    pub stage: CityStage,
     pub slots_total: i64,
     pub runs: Vec<RunView>,
     pub progress: Vec<ProgressView>,
@@ -86,17 +84,31 @@ pub async fn start(
     if stage < kind.min_stage() {
         return Err(ActivityError::Locked(kind.min_stage()));
     }
-    let total = slot_total(player_id);
+    let total = activity_slots_for_stage(stage);
     if activity_repo::count_occupied(&mut *tx, player_id).await? >= total {
         return Err(ActivityError::NoFreeSlot(total));
     }
     let (crew_bonus, _) = crew::bonus_for_activity_conn(&mut *tx, player_id, kind).await?;
-    let eff_secs = apply_efficiency_duration(def(kind).duration_secs, crew_bonus.efficiency_pct);
+    let (_, city_eff_bonus) = city::activity_bonuses_conn(&mut *tx, player_id, kind).await?;
+    let eff_secs = apply_efficiency_duration(
+        def(kind).duration_secs,
+        crew_bonus.efficiency_pct + city_eff_bonus,
+    );
     let secs = (eff_secs * duration_pct.max(1) / 100).max(1);
     let (id, ends_at) = activity_repo::insert_run(&mut *tx, player_id, kind.as_str(), secs).await?;
     scheduler::enqueue(&mut *tx, JOB_ACTIVITY_COMPLETE, id, ends_at).await?;
     tx.commit().await?;
     Ok(RunView { id, kind, status: RunStatus::Running, ends_at })
+}
+
+pub async fn has_active_kind(
+    pool: &PgPool,
+    player_id: i64,
+    kind: ActivityKind,
+) -> anyhow::Result<bool> {
+    let mut conn = pool.acquire().await?;
+    let rows = activity_repo::list_active(&mut *conn, player_id).await?;
+    Ok(rows.iter().any(|r| r.activity == kind.as_str()))
 }
 
 pub async fn overview(pool: &PgPool, player_id: i64) -> anyhow::Result<ActivityOverview> {
@@ -124,7 +136,12 @@ pub async fn overview(pool: &PgPool, player_id: i64) -> anyhow::Result<ActivityO
             xp_needed: xp_to_next(state.level),
         });
     }
-    Ok(ActivityOverview { slots_total: slot_total(player_id), runs, progress })
+    Ok(ActivityOverview {
+        stage,
+        slots_total: activity_slots_for_stage(stage),
+        runs,
+        progress,
+    })
 }
 
 /// Dipanggil worker di dalam transaksi job. Idempoten: hanya memproses run berstatus 'running'.
@@ -146,8 +163,8 @@ pub async fn complete_run(
     let progress = activity_repo::get_progress(conn, run.player_id, kind.as_str()).await?;
     let (crew_bonus, auto_enabled) =
         crew::bonus_for_activity_conn(conn, run.player_id, kind).await?;
-    let city_eff = city::effectiveness_for_conn(conn, run.player_id).await?;
-    let city_yield_delta = ((city_eff - 100) / 2) as i64;
+    let (city_yield_delta, city_eff_bonus) =
+        city::activity_bonuses_conn(conn, run.player_id, kind).await?;
     let rewards = {
         let mut rng = StdRng::from_entropy();
         roll_rewards_with_bonus(
@@ -169,12 +186,12 @@ pub async fn complete_run(
     let act_label = activity_name(kind, lang);
     let mut note = match lang {
         Lang::En => format!(
-            "<@{}> 🌾 Activity **{}** finished! Press **Collect Rewards** in the Activities menu.",
-            run.player_id, act_label
+            "🌾 Activity **{}** finished! Press **Collect Rewards** in the Activities menu.",
+            act_label
         ),
         Lang::Id => format!(
-            "<@{}> 🌾 Aktivitas **{}** selesai! Tekan **Ambil Reward** di menu Aktivitas.",
-            run.player_id, act_label
+            "🌾 Aktivitas **{}** selesai! Tekan **Ambil Reward** di menu Aktivitas.",
+            act_label
         ),
     };
     if auto_enabled {
@@ -183,10 +200,13 @@ pub async fn complete_run(
             .as_ref()
             .map(|s| s.items.iter().any(|(_, _, p)| *p > 0))
             .unwrap_or(false);
-        let total = slot_total(run.player_id);
+        let stage = city::stage_for_conn(conn, run.player_id).await?;
+        let total = activity_slots_for_stage(stage);
         if activity_repo::count_occupied(conn, run.player_id).await? < total {
-            let eff_secs =
-                apply_efficiency_duration(def(kind).duration_secs, crew_bonus.efficiency_pct);
+            let eff_secs = apply_efficiency_duration(
+                def(kind).duration_secs,
+                crew_bonus.efficiency_pct + city_eff_bonus,
+            );
             let secs = (eff_secs * duration_pct.max(1) / 100).max(1);
             let (new_id, ends_at) =
                 activity_repo::insert_run(conn, run.player_id, kind.as_str(), secs).await?;
@@ -195,12 +215,12 @@ pub async fn complete_run(
         if has_pending {
             note = match lang {
                 Lang::En => format!(
-                    "<@{}> ⚠️ Activity **{}** finished (AUTO), but your **inventory is full** — some items went to **Pending Claim**!",
-                    run.player_id, act_label
+                    "⚠️ Activity **{}** finished (AUTO), but your **inventory is full** — some items went to **Pending Claim**!",
+                    act_label
                 ),
                 Lang::Id => format!(
-                    "<@{}> ⚠️ Aktivitas **{}** selesai (AUTO), tetapi **inventory penuh** — sebagian item masuk **Pending Claim**!",
-                    run.player_id, act_label
+                    "⚠️ Aktivitas **{}** selesai (AUTO), tetapi **inventory penuh** — sebagian item masuk **Pending Claim**!",
+                    act_label
                 ),
             };
         } else {
@@ -240,24 +260,7 @@ async fn claim_one_conn(
     let old = activity_repo::lock_progress(conn, player_id, kind.as_str()).await?;
     let new = apply_xp(old, xp_gain, cap);
     activity_repo::save_progress(conn, player_id, kind.as_str(), new).await?;
-
-    if let Some(p) = player_repo::get(conn, player_id).await? {
-        let ps = apply_xp(XpState { level: p.level, xp: p.xp, overflow: 0 }, xp_gain, NO_CAP);
-        player_repo::set_progress(conn, player_id, ps.level, ps.xp).await?;
-        for r in eligible_rewards(ps.level) {
-            if player_repo::claim_progression_reward_if_absent(conn, player_id, r.key).await? {
-                let amount = Decimal::new(r.bac_cents, 2);
-                let _ = wallet_repo::apply(
-                    conn,
-                    player_id,
-                    amount,
-                    &format!("progression_reward:{}", r.key),
-                    &format!("prog_reward:{player_id}:{}", r.key),
-                )
-                .await;
-            }
-        }
-    }
+    player::grant_xp_conn(conn, player_id, xp_gain).await?;
 
     activity_repo::mark_claimed(conn, run_id).await?;
     Ok(Some(ClaimSummary { kind, items, xp_gain, old_level: old.level, new_level: new.level }))

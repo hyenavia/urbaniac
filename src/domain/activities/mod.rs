@@ -2,8 +2,16 @@ use crate::domain::city::CityStage;
 use rand::Rng;
 use std::collections::BTreeMap;
 
-/// Jumlah Activity Slot dasar. Crew bukan pengganti slot. Nilai awal sementara.
+/// Jumlah Activity Slot dasar (Kampung). Bertambah seiring naiknya stage kota.
 pub const BASE_ACTIVITY_SLOTS: i64 = 2;
+
+pub fn activity_slots_for_stage(stage: CityStage) -> i64 {
+    match stage {
+        CityStage::Kampung => BASE_ACTIVITY_SLOTS,
+        CityStage::Desa => 3,
+        CityStage::KotaKecil | CityStage::KotaDagang | CityStage::Metropolis => 4,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ActivityKind {
@@ -73,7 +81,7 @@ pub struct ActivityDef {
 pub static FARMING: ActivityDef = ActivityDef {
     kind: ActivityKind::Farming,
     duration_secs: 600,
-    xp_reward: 10,
+    xp_reward: 35,
     rolls: 3,
     drops: &[
         DropEntry { item_id: "wheat", min: 2, max: 4, weight: 70 },
@@ -84,7 +92,7 @@ pub static FARMING: ActivityDef = ActivityDef {
 pub static GATHERING: ActivityDef = ActivityDef {
     kind: ActivityKind::Gathering,
     duration_secs: 300,
-    xp_reward: 10,
+    xp_reward: 25,
     rolls: 3,
     drops: &[
         DropEntry { item_id: "wood", min: 2, max: 4, weight: 50 },
@@ -96,7 +104,7 @@ pub static GATHERING: ActivityDef = ActivityDef {
 pub static FISHING: ActivityDef = ActivityDef {
     kind: ActivityKind::Fishing,
     duration_secs: 480,
-    xp_reward: 15,
+    xp_reward: 40,
     rolls: 3,
     drops: &[
         DropEntry { item_id: "river_fish", min: 2, max: 4, weight: 65 },
@@ -108,7 +116,7 @@ pub static FISHING: ActivityDef = ActivityDef {
 pub static MINING: ActivityDef = ActivityDef {
     kind: ActivityKind::Mining,
     duration_secs: 720,
-    xp_reward: 20,
+    xp_reward: 55,
     rolls: 3,
     drops: &[
         DropEntry { item_id: "stone", min: 2, max: 5, weight: 60 },
@@ -127,9 +135,9 @@ pub fn def(kind: ActivityKind) -> &'static ActivityDef {
     }
 }
 
-/// Bonus yield dari level aktivitas: +2% per level di atas 1. Nilai awal sementara.
+/// Bonus yield dari level aktivitas: +4% per level di atas 1.
 pub fn yield_bonus_pct(level: i32) -> i64 {
-    2 * (level.max(1) - 1) as i64
+    4 * (level.max(1) - 1) as i64
 }
 
 /// Mengundi reward saat aktivitas selesai.
@@ -213,5 +221,14 @@ mod tests {
             let hi: i64 = roll_rewards(d, 10, &mut StdRng::seed_from_u64(seed)).iter().map(|x| x.1).sum();
             assert!(hi >= lo);
         }
+    }
+
+    #[test]
+    fn slots_scale_with_city_stage() {
+        assert_eq!(activity_slots_for_stage(CityStage::Kampung), 2);
+        assert_eq!(activity_slots_for_stage(CityStage::Desa), 3);
+        assert_eq!(activity_slots_for_stage(CityStage::KotaKecil), 4);
+        assert_eq!(activity_slots_for_stage(CityStage::KotaDagang), 4);
+        assert_eq!(activity_slots_for_stage(CityStage::Metropolis), 4);
     }
 }

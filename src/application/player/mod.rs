@@ -1,19 +1,20 @@
 use crate::application::{economy, inventory};
+use crate::domain::city::{CityStage, ProjectId};
 use crate::domain::economy::starter_bac;
 use crate::domain::i18n::Lang;
 use crate::domain::player::Player;
+use crate::domain::progression::{apply_xp, eligible_rewards, XpState, NO_CAP};
 use crate::infrastructure::repositories::{city_repo, player_repo, wallet_repo};
 use anyhow::anyhow;
 use rust_decimal::Decimal;
-use sqlx::PgPool;
-
-use crate::domain::city::CityStage;
+use sqlx::{PgConnection, PgPool};
 
 pub struct ProfileView {
     pub player: Player,
     pub balance: Decimal,
     pub city_stage: CityStage,
     pub inventory: inventory::InventoryView,
+    pub facilities: Vec<(ProjectId, i32)>,
 }
 
 /// create_player: registrasi otomatis lewat Discord User ID. Idempoten.
@@ -62,7 +63,45 @@ pub async fn get_player_profile(pool: &PgPool, id: i64) -> anyhow::Result<Option
     let balance = economy::balance(pool, id).await?;
     let city_stage = crate::application::city::stage_for(pool, id).await?;
     let inventory = inventory::view(pool, id).await?;
-    Ok(Some(ProfileView { player, balance, city_stage, inventory }))
+    let mut conn = pool.acquire().await?;
+    let facilities = city_repo::list_facilities(&mut *conn, id)
+        .await?
+        .into_iter()
+        .filter_map(|f| ProjectId::parse(&f.facility_id).map(|pid| (pid, f.level)))
+        .collect();
+    Ok(Some(ProfileView { player, balance, city_stage, inventory, facilities }))
+}
+
+pub async fn grant_xp_conn(
+    conn: &mut PgConnection,
+    player_id: i64,
+    xp_gain: i64,
+) -> sqlx::Result<()> {
+    if xp_gain <= 0 {
+        return Ok(());
+    }
+    if let Some(p) = player_repo::get(conn, player_id).await? {
+        let ps = apply_xp(
+            XpState { level: p.level, xp: p.xp, overflow: 0 },
+            xp_gain,
+            NO_CAP,
+        );
+        player_repo::set_progress(conn, player_id, ps.level, ps.xp).await?;
+        for r in eligible_rewards(ps.level) {
+            if player_repo::claim_progression_reward_if_absent(conn, player_id, r.key).await? {
+                let amount = Decimal::new(r.bac_cents, 2);
+                let _ = wallet_repo::apply(
+                    conn,
+                    player_id,
+                    amount,
+                    &format!("progression_reward:{}", r.key),
+                    &format!("prog_reward:{player_id}:{}", r.key),
+                )
+                .await;
+            }
+        }
+    }
+    Ok(())
 }
 
 pub async fn get_thread_id(pool: &PgPool, id: i64) -> anyhow::Result<Option<u64>> {

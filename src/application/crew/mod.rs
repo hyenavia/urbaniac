@@ -1,7 +1,9 @@
+use crate::application::city;
 use crate::domain::activities::ActivityKind;
+use crate::domain::city::CityStage;
 use crate::domain::crew::{
-    crew_bonus, parse_rarity, rarity_str, recruit_cost, roll_recruit, upgrade_cost, CrewBonus,
-    MAX_CREW_LEVEL, MAX_CREW_SLOTS,
+    crew_bonus, parse_rarity, rarity_str, recruit_cost, roll_recruit_for_stage, upgrade_cost,
+    CrewBonus, MAX_CREW_LEVEL, MAX_CREW_SLOTS,
 };
 use crate::domain::resources::Rarity;
 use crate::infrastructure::repositories::wallet_repo::{self, ApplyOutcome, WalletError};
@@ -20,6 +22,8 @@ pub enum CrewError {
     NotFound,
     #[error("kru sudah di level maksimal ({0})")]
     MaxLevel(i32),
+    #[error("aktivitas ini terbuka di stage {}", .0.name())]
+    ActivityLocked(CityStage),
     #[error("saldo Bac tidak cukup (butuh {need}, saldo {have})")]
     InsufficientBac { need: Decimal, have: Decimal },
     #[error(transparent)]
@@ -114,8 +118,9 @@ pub async fn recruit(
         }
         ApplyOutcome::Applied { .. } => {}
     }
+    let stage = city::stage_for_conn(&mut *tx, player_id).await?;
     let mut rng = StdRng::from_entropy();
-    let (name, rarity, spec) = roll_recruit(&mut rng);
+    let (name, rarity, spec) = roll_recruit_for_stage(stage, &mut rng);
     let row = crew_repo::insert_crew(&mut *tx, player_id, name, rarity_str(rarity), spec.as_str())
         .await?;
     tx.commit().await?;
@@ -188,6 +193,10 @@ pub async fn assign(
         return Err(CrewError::NotFound);
     }
     if let Some(act) = activity {
+        let stage = city::stage_for_conn(&mut *tx, player_id).await?;
+        if stage < act.min_stage() {
+            return Err(CrewError::ActivityLocked(act.min_stage()));
+        }
         crew_repo::clear_activity_assignment(&mut *tx, player_id, act.as_str()).await?;
         crew_repo::set_assignment(&mut *tx, crew_id, Some(act.as_str()), auto_enabled).await?;
     } else {

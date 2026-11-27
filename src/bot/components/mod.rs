@@ -1,5 +1,8 @@
+use crate::domain::activities::ActivityKind;
 use crate::domain::city::{def as project_def, CityStage, ProjectId};
-use crate::domain::i18n::{project_name, recipe_short_name, Lang};
+use crate::domain::economy::format_bac;
+use crate::domain::i18n::{activity_name, project_name, recipe_short_name, Lang};
+use rust_decimal::Decimal;
 use serenity::all::*;
 
 pub const PREFIX: &str = "ub";
@@ -14,52 +17,79 @@ fn btn(action: &str, owner: u64, rest: &str, label: &str, style: ButtonStyle) ->
 }
 
 pub fn main_menu(owner: u64, lang: Lang) -> Vec<CreateActionRow> {
-    let (l_prof, l_inv, l_act, l_city, l_crew, l_mkt, l_craft, l_sell, l_claim, l_guide, l_lang) =
-        match lang {
-            Lang::En => (
-                "Profile",
-                "Inventory",
-                "Activities",
-                "City",
-                "Crew",
-                "Market & Broker",
-                "Crafting & Orders",
-                "Sell NPC",
-                "Claim Pending",
-                "Guide",
-                "🌐 Language: EN (Switch to ID)",
-            ),
-            Lang::Id => (
-                "Profil",
-                "Inventory",
-                "Aktivitas",
-                "Kota",
-                "Kru",
-                "Pasar & Makelar",
-                "Crafting & Pesanan",
-                "Jual NPC",
-                "Klaim Pending",
-                "Panduan",
-                "🌐 Bahasa: ID (Ganti ke EN)",
-            ),
-        };
+    let (l_prof, l_inv, l_act, l_city, l_mkt, l_craft, l_crew, l_guide) = match lang {
+        Lang::En => (
+            "Profile",
+            "Inventory",
+            "Activities",
+            "City",
+            "Market & Broker",
+            "Crafting & Orders",
+            "Crew",
+            "Guide",
+        ),
+        Lang::Id => (
+            "Profil",
+            "Inventory",
+            "Aktivitas",
+            "Kota",
+            "Pasar & Makelar",
+            "Crafting & Pesanan",
+            "Kru",
+            "Panduan",
+        ),
+    };
     vec![
         CreateActionRow::Buttons(vec![
             btn("profile", owner, "", l_prof, ButtonStyle::Primary),
             btn("inventory", owner, "", l_inv, ButtonStyle::Secondary),
             btn("activities", owner, "", l_act, ButtonStyle::Primary),
             btn("city", owner, "", l_city, ButtonStyle::Primary),
-            btn("crew", owner, "", l_crew, ButtonStyle::Primary),
         ]),
         CreateActionRow::Buttons(vec![
             btn("market", owner, "", l_mkt, ButtonStyle::Success),
             btn("craft", owner, "", l_craft, ButtonStyle::Success),
-            btn("sell", owner, "", l_sell, ButtonStyle::Success),
-            btn("claim", owner, "", l_claim, ButtonStyle::Secondary),
+            btn("crew", owner, "", l_crew, ButtonStyle::Primary),
             btn("guide", owner, "", l_guide, ButtonStyle::Secondary),
         ]),
-        CreateActionRow::Buttons(vec![btn("lang", owner, "", l_lang, ButtonStyle::Secondary)]),
     ]
+}
+
+pub fn profile_menu(owner: u64, lang: Lang) -> Vec<CreateActionRow> {
+    let l_lang = match lang {
+        Lang::En => "🌐 Language: EN (Switch to ID)",
+        Lang::Id => "🌐 Bahasa: ID (Ganti ke EN)",
+    };
+    let mut rows = main_menu(owner, lang);
+    rows.push(CreateActionRow::Buttons(vec![btn(
+        "lang",
+        owner,
+        "",
+        l_lang,
+        ButtonStyle::Secondary,
+    )]));
+    rows
+}
+
+pub fn inventory_menu(
+    owner: u64,
+    has_items: bool,
+    has_pending: bool,
+    lang: Lang,
+) -> Vec<CreateActionRow> {
+    let (sell_lbl, claim_lbl, menu_lbl) = match lang {
+        Lang::En => ("Sell to NPC", "Claim Pending", "Main Menu"),
+        Lang::Id => ("Jual ke NPC", "Klaim Pending", "Menu Utama"),
+    };
+    let mut buttons = vec![
+        btn("sell", owner, "", sell_lbl, ButtonStyle::Success).disabled(!has_items),
+    ];
+    if has_pending {
+        buttons.push(btn("claim", owner, "", claim_lbl, ButtonStyle::Primary));
+    }
+    buttons.push(btn("inventory", owner, "", "Refresh", ButtonStyle::Secondary));
+    buttons.push(btn("profile", owner, "", menu_lbl, ButtonStyle::Secondary));
+    vec![CreateActionRow::Buttons(buttons)]
 }
 
 pub fn city_menu(
@@ -90,9 +120,23 @@ pub fn city_menu(
         .take(5)
         .collect();
 
-    let (dep_lbl, t5, t10, t15, menu_lbl) = match lang {
-        Lang::En => ("Deposit 50 Bac", "Tax 5%", "Tax 10%", "Tax 15%", "Main Menu"),
-        Lang::Id => ("Setor 50 Bac", "Pajak 5%", "Pajak 10%", "Pajak 15%", "Menu Utama"),
+    let (dep_lbl, wd_lbl, t5, t10, t15, menu_lbl) = match lang {
+        Lang::En => (
+            "Deposit",
+            "Withdraw",
+            "Tax 5%",
+            "Tax 10%",
+            "Tax 15%",
+            "Main Menu",
+        ),
+        Lang::Id => (
+            "Setor Custom",
+            "Tarik Treasury",
+            "Pajak 5%",
+            "Pajak 10%",
+            "Pajak 15%",
+            "Menu Utama",
+        ),
     };
 
     let mut rows = Vec::new();
@@ -100,7 +144,8 @@ pub fn city_menu(
         rows.push(CreateActionRow::Buttons(proj_buttons));
     }
     rows.push(CreateActionRow::Buttons(vec![
-        btn("citydep", owner, "50", dep_lbl, ButtonStyle::Primary),
+        btn("citydepcustom", owner, "", dep_lbl, ButtonStyle::Primary),
+        btn("citywdcustom", owner, "", wd_lbl, ButtonStyle::Primary),
         btn("citytax", owner, "5", t5, ButtonStyle::Secondary),
         btn("citytax", owner, "10", t10, ButtonStyle::Secondary),
         btn("citytax", owner, "15", t15, ButtonStyle::Secondary),
@@ -112,32 +157,72 @@ pub fn city_menu(
     rows
 }
 
-pub fn activity_menu(owner: u64, lang: Lang) -> Vec<CreateActionRow> {
-    let (f, g, fi, m, collect, menu) = match lang {
+pub fn city_deposit_modal(owner: u64, wallet_balance: Decimal, lang: Lang) -> CreateModal {
+    let (label, ph, title) = match lang {
         Lang::En => (
-            "Start Farming",
-            "Start Gathering",
-            "Start Fishing",
-            "Start Mining",
-            "Collect Rewards",
-            "Main Menu",
+            format!("Amount (Wallet: {})", format_bac(wallet_balance)),
+            "e.g. 100 or max",
+            "Deposit to City Treasury",
         ),
         Lang::Id => (
-            "Mulai Farming",
-            "Mulai Gathering",
-            "Mulai Fishing",
-            "Mulai Mining",
-            "Ambil Reward",
-            "Menu Utama",
+            format!("Jumlah (Saldo: {})", format_bac(wallet_balance)),
+            "Contoh: 100 atau max",
+            "Setor ke City Treasury",
         ),
     };
+    let label: String = label.chars().take(45).collect();
+    let input = CreateInputText::new(InputTextStyle::Short, label, "amount")
+        .placeholder(ph)
+        .required(true)
+        .min_length(1)
+        .max_length(20);
+    CreateModal::new(format!("{PREFIX}:citydepmodal:{owner}"), title)
+        .components(vec![CreateActionRow::InputText(input)])
+}
+
+pub fn city_withdraw_modal(owner: u64, treasury_balance: Decimal, lang: Lang) -> CreateModal {
+    let (label, ph, title) = match lang {
+        Lang::En => (
+            format!("Amount (Treasury: {})", format_bac(treasury_balance)),
+            "e.g. 100 or max",
+            "Withdraw from City Treasury",
+        ),
+        Lang::Id => (
+            format!("Jumlah (Treasury: {})", format_bac(treasury_balance)),
+            "Contoh: 100 atau max",
+            "Tarik dari City Treasury",
+        ),
+    };
+    let label: String = label.chars().take(45).collect();
+    let input = CreateInputText::new(InputTextStyle::Short, label, "amount")
+        .placeholder(ph)
+        .required(true)
+        .min_length(1)
+        .max_length(20);
+    CreateModal::new(format!("{PREFIX}:citywdmodal:{owner}"), title)
+        .components(vec![CreateActionRow::InputText(input)])
+}
+
+pub fn activity_menu(owner: u64, stage: CityStage, lang: Lang) -> Vec<CreateActionRow> {
+    let (verb, collect, menu) = match lang {
+        Lang::En => ("Start", "Collect Rewards", "Main Menu"),
+        Lang::Id => ("Mulai", "Ambil Reward", "Menu Utama"),
+    };
+    let act_buttons: Vec<CreateButton> = ActivityKind::ALL
+        .iter()
+        .map(|&kind| {
+            let locked = stage < kind.min_stage();
+            let a_name = activity_name(kind, lang);
+            let label = if locked {
+                format!("🔒 {verb} {a_name}")
+            } else {
+                format!("{verb} {a_name}")
+            };
+            btn("startact", owner, kind.as_str(), &label, ButtonStyle::Success).disabled(locked)
+        })
+        .collect();
     vec![
-        CreateActionRow::Buttons(vec![
-            btn("startact", owner, "farming", f, ButtonStyle::Success),
-            btn("startact", owner, "gathering", g, ButtonStyle::Success),
-            btn("startact", owner, "fishing", fi, ButtonStyle::Success),
-            btn("startact", owner, "mining", m, ButtonStyle::Success),
-        ]),
+        CreateActionRow::Buttons(act_buttons),
         CreateActionRow::Buttons(vec![
             btn("collect", owner, "", collect, ButtonStyle::Primary),
             btn("activities", owner, "", "Refresh", ButtonStyle::Secondary),
@@ -219,11 +304,14 @@ pub fn sell_custom_modal(
 }
 
 pub fn market_menu(owner: u64, has_listings: bool, lang: Lang) -> Vec<CreateActionRow> {
-    let (new_lbl, cancel_lbl, menu_lbl) = match lang {
-        Lang::En => ("List with Broker", "Cancel Listing", "Main Menu"),
-        Lang::Id => ("Titip ke Makelar", "Batalkan Listing", "Menu Utama"),
+    let (sell_lbl, new_lbl, cancel_lbl, menu_lbl) = match lang {
+        Lang::En => ("Sell to NPC", "List with Broker", "Cancel Listing", "Main Menu"),
+        Lang::Id => ("Jual ke NPC", "Titip ke Makelar", "Batalkan Listing", "Menu Utama"),
     };
-    let mut buttons = vec![btn("mktnew", owner, "", new_lbl, ButtonStyle::Success)];
+    let mut buttons = vec![
+        btn("sell", owner, "", sell_lbl, ButtonStyle::Success),
+        btn("mktnew", owner, "", new_lbl, ButtonStyle::Primary),
+    ];
     if has_listings {
         buttons.push(btn("mktcancel", owner, "", cancel_lbl, ButtonStyle::Danger));
     }
@@ -289,10 +377,18 @@ pub fn broker_qty_select(
             ButtonStyle::Primary,
         ));
     }
-    vec![
-        CreateActionRow::Buttons(buttons),
-        CreateActionRow::Buttons(vec![btn("market", owner, "", back, ButtonStyle::Secondary)]),
-    ]
+    let mut rows = Vec::new();
+    if !buttons.is_empty() {
+        rows.push(CreateActionRow::Buttons(buttons));
+    }
+    rows.push(CreateActionRow::Buttons(vec![btn(
+        "market",
+        owner,
+        "",
+        back,
+        ButtonStyle::Secondary,
+    )]));
+    rows
 }
 
 pub fn broker_terms_select(
@@ -302,14 +398,14 @@ pub fn broker_terms_select(
     lang: Lang,
 ) -> Vec<CreateActionRow> {
     let (l1, l6, l24, back) = match lang {
-        Lang::En => ("+10% (1 Hr)", "+25% (6 Hrs)", "+40% (24 Hrs)", "Back"),
-        Lang::Id => ("+10% (1 Jam)", "+25% (6 Jam)", "+40% (24 Jam)", "Kembali"),
+        Lang::En => ("+10% (2 Hrs)", "+20% (6 Hrs)", "+35% (24 Hrs)", "Back"),
+        Lang::Id => ("+10% (2 Jam)", "+20% (6 Jam)", "+35% (24 Jam)", "Kembali"),
     };
     vec![
         CreateActionRow::Buttons(vec![
-            btn("mktpost", owner, &format!("{item_id}:{qty}:110:1h"), l1, ButtonStyle::Success),
-            btn("mktpost", owner, &format!("{item_id}:{qty}:125:6h"), l6, ButtonStyle::Success),
-            btn("mktpost", owner, &format!("{item_id}:{qty}:140:24h"), l24, ButtonStyle::Success),
+            btn("mktpost", owner, &format!("{item_id}:{qty}:110:2h"), l1, ButtonStyle::Success),
+            btn("mktpost", owner, &format!("{item_id}:{qty}:120:6h"), l6, ButtonStyle::Success),
+            btn("mktpost", owner, &format!("{item_id}:{qty}:135:24h"), l24, ButtonStyle::Success),
         ]),
         CreateActionRow::Buttons(vec![btn("market", owner, "", back, ButtonStyle::Secondary)]),
     ]
@@ -377,28 +473,95 @@ pub fn craft_menu(owner: u64, auto_sell: bool, lang: Lang) -> Vec<CreateActionRo
     } else {
         "Auto-Sell Craft: OFF"
     };
-    let (fulfill_lbl, menu_lbl) = match lang {
-        Lang::En => ("Fulfill Order", "Main Menu"),
-        Lang::Id => ("Penuhi Pesanan", "Menu Utama"),
+    let (fulfill_lbl, refresh_ord_lbl, menu_lbl) = match lang {
+        Lang::En => ("Fulfill Order", "Reroll Orders", "Main Menu"),
+        Lang::Id => ("Penuhi Pesanan", "Ganti Pesanan", "Menu Utama"),
     };
     vec![
         CreateActionRow::Buttons(vec![
-            btn("craftdo", owner, "flour", &format!("Craft {}", recipe_short_name("flour", lang)), ButtonStyle::Success),
-            btn("craftdo", owner, "plank", &format!("Craft {}", recipe_short_name("plank", lang)), ButtonStyle::Success),
-            btn("craftdo", owner, "herb_extract", &format!("Craft {}", recipe_short_name("herb_extract", lang)), ButtonStyle::Success),
+            btn("craftpick", owner, "flour", &format!("Craft {}", recipe_short_name("flour", lang)), ButtonStyle::Success),
+            btn("craftpick", owner, "plank", &format!("Craft {}", recipe_short_name("plank", lang)), ButtonStyle::Success),
+            btn("craftpick", owner, "herb_extract", &format!("Craft {}", recipe_short_name("herb_extract", lang)), ButtonStyle::Success),
         ]),
         CreateActionRow::Buttons(vec![
-            btn("craftdo", owner, "bread", &format!("Craft {}", recipe_short_name("bread", lang)), ButtonStyle::Primary),
-            btn("craftdo", owner, "wooden_crate", &format!("Craft {}", recipe_short_name("wooden_crate", lang)), ButtonStyle::Primary),
-            btn("craftdo", owner, "healing_tonic", &format!("Craft {}", recipe_short_name("healing_tonic", lang)), ButtonStyle::Primary),
+            btn("craftpick", owner, "bread", &format!("Craft {}", recipe_short_name("bread", lang)), ButtonStyle::Primary),
+            btn("craftpick", owner, "wooden_crate", &format!("Craft {}", recipe_short_name("wooden_crate", lang)), ButtonStyle::Primary),
+            btn("craftpick", owner, "healing_tonic", &format!("Craft {}", recipe_short_name("healing_tonic", lang)), ButtonStyle::Primary),
         ]),
         CreateActionRow::Buttons(vec![
             btn("orderpick", owner, "", fulfill_lbl, ButtonStyle::Success),
+            btn("orderrefresh", owner, "", refresh_ord_lbl, ButtonStyle::Primary),
             btn("craftauto", owner, "", auto_label, ButtonStyle::Secondary),
             btn("craft", owner, "", "Refresh", ButtonStyle::Secondary),
             btn("profile", owner, "", menu_lbl, ButtonStyle::Secondary),
         ]),
     ]
+}
+
+pub fn craft_qty(owner: u64, recipe_id: &str, max_batch: i64, lang: Lang) -> Vec<CreateActionRow> {
+    let (c1, c5, c10, cmax, ccust, back) = match lang {
+        Lang::En => (
+            "Craft 1",
+            "Craft 5",
+            "Craft 10",
+            format!("Craft Max ({max_batch})"),
+            "Craft Custom",
+            "Back",
+        ),
+        Lang::Id => (
+            "Craft 1",
+            "Craft 5",
+            "Craft 10",
+            format!("Craft Max ({max_batch})"),
+            "Craft Custom",
+            "Kembali",
+        ),
+    };
+    vec![
+        CreateActionRow::Buttons(vec![
+            btn("craftbatch", owner, &format!("{recipe_id}:1"), c1, ButtonStyle::Success)
+                .disabled(max_batch < 1),
+            btn("craftbatch", owner, &format!("{recipe_id}:5"), c5, ButtonStyle::Success)
+                .disabled(max_batch < 5),
+            btn("craftbatch", owner, &format!("{recipe_id}:10"), c10, ButtonStyle::Success)
+                .disabled(max_batch < 10),
+            btn("craftbatch", owner, &format!("{recipe_id}:max"), &cmax, ButtonStyle::Primary)
+                .disabled(max_batch < 1),
+            btn("craftcustom", owner, recipe_id, ccust, ButtonStyle::Primary)
+                .disabled(max_batch < 1),
+        ]),
+        CreateActionRow::Buttons(vec![btn("craft", owner, "", back, ButtonStyle::Secondary)]),
+    ]
+}
+
+pub fn craft_custom_modal(
+    owner: u64,
+    recipe_id: &str,
+    recipe_label: &str,
+    max_batch: i64,
+    lang: Lang,
+) -> CreateModal {
+    let (label, ph, title) = match lang {
+        Lang::En => (
+            format!("Batch qty (max {max_batch})"),
+            "e.g. 15 or max",
+            format!("Craft Custom — {recipe_label}"),
+        ),
+        Lang::Id => (
+            format!("Jumlah batch (maks {max_batch})"),
+            "Contoh: 15 atau max",
+            format!("Craft Custom — {recipe_label}"),
+        ),
+    };
+    let label: String = label.chars().take(45).collect();
+    let title: String = title.chars().take(45).collect();
+    let input = CreateInputText::new(InputTextStyle::Short, label, "qty")
+        .placeholder(ph)
+        .required(true)
+        .min_length(1)
+        .max_length(10);
+    CreateModal::new(format!("{PREFIX}:craftmodal:{owner}:{recipe_id}"), title)
+        .components(vec![CreateActionRow::InputText(input)])
 }
 
 pub fn order_select(
@@ -474,21 +637,60 @@ pub fn crew_select(
     ]
 }
 
-pub fn crew_assign_activity(owner: u64, crew_id: i64, lang: Lang) -> Vec<CreateActionRow> {
+pub fn crew_assign_activity(
+    owner: u64,
+    crew_id: i64,
+    stage: CityStage,
+    lang: Lang,
+) -> Vec<CreateActionRow> {
     let (unassign, back) = match lang {
         Lang::En => ("Unassign", "Back"),
         Lang::Id => ("Lepas Tugas", "Kembali"),
     };
+    let auto_row: Vec<CreateButton> = ActivityKind::ALL
+        .iter()
+        .map(|&kind| {
+            let locked = stage < kind.min_stage();
+            let a_name = activity_name(kind, lang);
+            let label = if locked {
+                format!("🔒 {a_name} + Auto")
+            } else {
+                format!("{a_name} + Auto")
+            };
+            btn(
+                "crewset",
+                owner,
+                &format!("{crew_id}:{}:1", kind.as_str()),
+                &label,
+                ButtonStyle::Success,
+            )
+            .disabled(locked)
+        })
+        .collect();
+    let manual_row: Vec<CreateButton> = ActivityKind::ALL
+        .iter()
+        .map(|&kind| {
+            let locked = stage < kind.min_stage();
+            let a_name = activity_name(kind, lang);
+            let label = if locked {
+                format!("🔒 {a_name} (Manual)")
+            } else {
+                format!("{a_name} (Manual)")
+            };
+            btn(
+                "crewset",
+                owner,
+                &format!("{crew_id}:{}:0", kind.as_str()),
+                &label,
+                ButtonStyle::Primary,
+            )
+            .disabled(locked)
+        })
+        .collect();
     vec![
+        CreateActionRow::Buttons(auto_row),
+        CreateActionRow::Buttons(manual_row),
         CreateActionRow::Buttons(vec![
-            btn("crewset", owner, &format!("{crew_id}:farming:1"), "Farming + Auto", ButtonStyle::Success),
-            btn("crewset", owner, &format!("{crew_id}:gathering:1"), "Gathering + Auto", ButtonStyle::Success),
-            btn("crewset", owner, &format!("{crew_id}:fishing:1"), "Fishing + Auto", ButtonStyle::Success),
-            btn("crewset", owner, &format!("{crew_id}:mining:1"), "Mining + Auto", ButtonStyle::Success),
-        ]),
-        CreateActionRow::Buttons(vec![
-            btn("crewset", owner, &format!("{crew_id}:farming:0"), "Farming (Manual)", ButtonStyle::Primary),
-            btn("crewset", owner, &format!("{crew_id}:gathering:0"), "Gathering (Manual)", ButtonStyle::Primary),
             btn("crewset", owner, &format!("{crew_id}:none:0"), unassign, ButtonStyle::Danger),
             btn("crew", owner, "", back, ButtonStyle::Secondary),
         ]),

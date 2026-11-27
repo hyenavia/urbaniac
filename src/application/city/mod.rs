@@ -1,6 +1,8 @@
+use crate::domain::activities::ActivityKind;
 use crate::domain::city::{
-    def, local_modifier_from_city, project_cost_bac_for_level, settle_city_economy_tick, CityStage,
-    ProjectId, CITY_ECONOMY_TICK_SECS, MAX_TAX_RATE, MIN_TAX_RATE,
+    def, local_modifier_from_city, project_cost_bac_for_level, settle_city_economy_tick,
+    yield_bonus_from_effectiveness, CityStage, ProjectId, CITY_ECONOMY_TICK_SECS, MAX_TAX_RATE,
+    MIN_TAX_RATE,
 };
 use crate::domain::i18n::{activity_name, project_name, stage_name, Lang};
 use crate::domain::resources::find_item;
@@ -30,6 +32,8 @@ pub enum CityError {
     StageAlreadyAdvanced,
     #[error("saldo Bac tidak cukup (butuh {need}, saldo {have})")]
     InsufficientBac { need: Decimal, have: Decimal },
+    #[error("saldo City Treasury tidak cukup (butuh {need}, saldo {have})")]
+    InsufficientTreasury { need: Decimal, have: Decimal },
     #[error("resource {name} tidak cukup (butuh {need}, punya {have})")]
     InsufficientItem { name: &'static str, need: i64, have: i64 },
     #[error("jumlah setoran harus lebih dari 0")]
@@ -61,6 +65,10 @@ pub struct CityOverview {
     pub welfare: i32,
     pub effectiveness_pct: i32,
     pub local_modifier: Decimal,
+    pub est_tax_income: Decimal,
+    pub est_expense: Decimal,
+    pub assigned_crews: i64,
+    pub yield_bonus_pct: i64,
     pub facilities: Vec<FacilityView>,
     pub running_project: Option<RunningProjectView>,
 }
@@ -93,13 +101,28 @@ pub async fn overview(pool: &PgPool, player_id: i64) -> anyhow::Result<CityOverv
     let wallet_balance = wallet_repo::balance(&mut *conn, player_id)
         .await?
         .unwrap_or(Decimal::ZERO);
-    let facilities = city_repo::list_facilities(&mut *conn, player_id)
+    let facilities: Vec<FacilityView> = city_repo::list_facilities(&mut *conn, player_id)
         .await?
         .into_iter()
         .filter_map(|f| {
             ProjectId::parse(&f.facility_id).map(|id| FacilityView { id, level: f.level })
         })
         .collect();
+    let assigned_crews = crew_repo::count_assigned_crews(&mut *conn, player_id).await?;
+    let preview = settle_city_economy_tick(
+        treasury,
+        stage,
+        facilities.len() as i64,
+        assigned_crews,
+        tax_rate_pct,
+        welfare,
+    );
+    let granary_lvl = facilities
+        .iter()
+        .find(|f| f.id == ProjectId::Granary)
+        .map(|f| f.level as i64)
+        .unwrap_or(0);
+    let yield_bonus_pct = yield_bonus_from_effectiveness(effectiveness_pct) + granary_lvl * 3;
     let running_project = city_repo::get_running_project(&mut *conn, player_id)
         .await?
         .and_then(|r| {
@@ -117,6 +140,10 @@ pub async fn overview(pool: &PgPool, player_id: i64) -> anyhow::Result<CityOverv
         welfare,
         effectiveness_pct,
         local_modifier,
+        est_tax_income: preview.tax_income,
+        est_expense: preview.maintenance + preview.crew_salary,
+        assigned_crews,
+        yield_bonus_pct,
         facilities,
         running_project,
     })
@@ -190,11 +217,16 @@ pub async fn start_project(
     }
 
     let cost_bac = project_cost_bac_for_level(pdef, next_level);
+    let treasury = city_repo::get(&mut *tx, player_id)
+        .await?
+        .map(|c| c.treasury)
+        .unwrap_or(Decimal::ZERO);
     let have_bac = wallet_repo::balance(&mut *tx, player_id)
         .await?
         .unwrap_or(Decimal::ZERO);
-    if have_bac < cost_bac {
-        return Err(CityError::InsufficientBac { need: cost_bac, have: have_bac });
+    let total_avail = treasury + have_bac;
+    if total_avail < cost_bac {
+        return Err(CityError::InsufficientBac { need: cost_bac, have: total_avail });
     }
 
     for (item_id, need) in pdef.cost_items {
@@ -206,9 +238,19 @@ pub async fn start_project(
         }
     }
 
+    let from_treasury = treasury.min(cost_bac);
+    let from_wallet = cost_bac - from_treasury;
     let reason = format!("city_project:{}", project.as_str());
-    match wallet_repo::apply(&mut *tx, player_id, -cost_bac, &reason, idempotency_key).await? {
-        ApplyOutcome::Duplicate => {
+    if from_treasury > Decimal::ZERO {
+        if let ApplyOutcome::Duplicate = city_repo::apply_treasury(
+            &mut *tx,
+            player_id,
+            -from_treasury,
+            &reason,
+            &format!("t:{idempotency_key}"),
+        )
+        .await?
+        {
             if let Some(running) = city_repo::get_running_project(&mut *tx, player_id).await? {
                 return Ok(RunningProjectView {
                     id: running.id,
@@ -218,7 +260,25 @@ pub async fn start_project(
             }
             return Err(CityError::AlreadyBuilt(pdef.name));
         }
-        ApplyOutcome::Applied { .. } => {}
+    }
+    if from_wallet > Decimal::ZERO {
+        let w_key = if from_treasury > Decimal::ZERO {
+            format!("w:{idempotency_key}")
+        } else {
+            idempotency_key.to_string()
+        };
+        if let ApplyOutcome::Duplicate =
+            wallet_repo::apply(&mut *tx, player_id, -from_wallet, &reason, &w_key).await?
+        {
+            if let Some(running) = city_repo::get_running_project(&mut *tx, player_id).await? {
+                return Ok(RunningProjectView {
+                    id: running.id,
+                    project,
+                    ends_at: running.ends_at,
+                });
+            }
+            return Err(CityError::AlreadyBuilt(pdef.name));
+        }
     }
 
     for (item_id, need) in pdef.cost_items {
@@ -351,6 +411,65 @@ pub async fn deposit_to_treasury(
     }
 }
 
+pub async fn withdraw_from_treasury(
+    pool: &PgPool,
+    player_id: i64,
+    amount: Decimal,
+    idempotency_key: &str,
+) -> Result<(Decimal, Decimal), CityError> {
+    let amount = amount.round_dp(2);
+    if amount <= Decimal::ZERO {
+        return Err(CityError::InvalidAmount);
+    }
+    let mut tx = pool.begin().await?;
+    if !player_repo::lock(&mut *tx, player_id).await? {
+        return Err(CityError::NotRegistered);
+    }
+    city_repo::create(&mut *tx, player_id).await?;
+
+    let have = city_repo::get(&mut *tx, player_id)
+        .await?
+        .map(|c| c.treasury)
+        .unwrap_or(Decimal::ZERO);
+    if have < amount {
+        return Err(CityError::InsufficientTreasury { need: amount, have });
+    }
+
+    let treasury_out = city_repo::apply_treasury(
+        &mut *tx,
+        player_id,
+        -amount,
+        "player_withdraw",
+        &format!("tw:{idempotency_key}"),
+    )
+    .await?;
+    let wallet_out = wallet_repo::apply(
+        &mut *tx,
+        player_id,
+        amount,
+        "treasury_withdraw",
+        &format!("ww:{idempotency_key}"),
+    )
+    .await?;
+
+    match (wallet_out, treasury_out) {
+        (ApplyOutcome::Applied { balance: w }, ApplyOutcome::Applied { balance: t }) => {
+            tx.commit().await?;
+            Ok((w, t))
+        }
+        _ => {
+            let w = wallet_repo::balance(&mut *tx, player_id)
+                .await?
+                .unwrap_or(Decimal::ZERO);
+            let t = city_repo::get(&mut *tx, player_id)
+                .await?
+                .map(|c| c.treasury)
+                .unwrap_or(Decimal::ZERO);
+            Ok((w, t))
+        }
+    }
+}
+
 pub async fn set_tax_rate(pool: &PgPool, player_id: i64, pct: i32) -> Result<i32, CityError> {
     if !(MIN_TAX_RATE..=MAX_TAX_RATE).contains(&pct) {
         return Err(CityError::InvalidTaxRate);
@@ -373,6 +492,59 @@ pub async fn effectiveness_for_conn(conn: &mut PgConnection, player_id: i64) -> 
     Ok(eff)
 }
 
+/// Mengembalikan `(extra_yield_pct, extra_efficiency_pct)` dari kota & fasilitas terpasang.
+pub async fn activity_bonuses_conn(
+    conn: &mut PgConnection,
+    player_id: i64,
+    kind: ActivityKind,
+) -> sqlx::Result<(i64, i64)> {
+    let eff_yield = yield_bonus_from_effectiveness(effectiveness_for_conn(conn, player_id).await?);
+    let well_yield = if matches!(kind, ActivityKind::Farming | ActivityKind::Gathering)
+        && city_repo::facility_level(conn, player_id, ProjectId::Well.as_str()).await? > 0
+    {
+        10
+    } else {
+        0
+    };
+    let granary_lvl =
+        city_repo::facility_level(conn, player_id, ProjectId::Granary.as_str()).await? as i64;
+    let metro_eff =
+        if city_repo::facility_level(conn, player_id, ProjectId::MetropolisTower.as_str()).await?
+            > 0
+        {
+            15
+        } else {
+            0
+        };
+    Ok((eff_yield + well_yield + granary_lvl * 3, metro_eff))
+}
+
+/// Mengembalikan `(max_concurrent_crafts, order_bonus_pct, craft_efficiency_pct)` dari fasilitas.
+pub async fn craft_bonuses_conn(
+    conn: &mut PgConnection,
+    player_id: i64,
+) -> sqlx::Result<(i64, i64, i64)> {
+    let has_port =
+        city_repo::facility_level(conn, player_id, ProjectId::TradePort.as_str()).await? > 0;
+    let has_metro =
+        city_repo::facility_level(conn, player_id, ProjectId::MetropolisTower.as_str()).await?
+            > 0;
+    Ok((
+        if has_port { 3 } else { 2 },
+        if has_port { 15 } else { 0 },
+        if has_metro { 15 } else { 0 },
+    ))
+}
+
+pub async fn market_hall_bonus_pct_conn(
+    conn: &mut PgConnection,
+    player_id: i64,
+) -> sqlx::Result<i64> {
+    let has =
+        city_repo::facility_level(conn, player_id, ProjectId::MarketHall.as_str()).await? > 0;
+    Ok(if has { 5 } else { 0 })
+}
+
 /// Memproses satu siklus pajak warga, maintenance fasilitas, gaji kru, dan welfare semua kota.
 pub async fn run_city_economy_tick_conn(
     conn: &mut PgConnection,
@@ -383,7 +555,7 @@ pub async fn run_city_economy_tick_conn(
     for c in cities {
         let stage = CityStage::parse(&c.stage).unwrap_or(CityStage::Kampung);
         let facility_count = city_repo::list_facilities(conn, c.player_id).await?.len() as i64;
-        let crew_count = crew_repo::count_crews(conn, c.player_id).await?;
+        let crew_count = crew_repo::count_assigned_crews(conn, c.player_id).await?;
         let outcome = settle_city_economy_tick(
             c.treasury,
             stage,

@@ -143,20 +143,20 @@ pub fn project_name(id: ProjectId, lang: Lang) -> &'static str {
 
 pub fn project_desc(id: ProjectId, lang: Lang) -> &'static str {
     match (id, lang) {
-        (ProjectId::Well, Lang::En) => "Clean water source for your Hamlet. Prerequisite for Village Hall.",
-        (ProjectId::Well, Lang::Id) => "Sumber air bersih Kampung. Prasyarat Balai Kampung.",
-        (ProjectId::Granary, Lang::En) => "Adds +4 inventory capacity slots per level (max Lv 5).",
-        (ProjectId::Granary, Lang::Id) => "Menambah +4 slot kapasitas inventory per level (maks Lv 5).",
-        (ProjectId::TownHall, Lang::En) => "Advances your city to Village (unlocks Fishing & Lv 20 cap; requires Well & Granary).",
-        (ProjectId::TownHall, Lang::Id) => "Naikkan kota ke Desa (buka Fishing & cap Lv 20; butuh Sumur & Lumbung).",
-        (ProjectId::MarketHall, Lang::En) => "Village trade center. Prerequisite for Town Hall.",
-        (ProjectId::MarketHall, Lang::Id) => "Pusat niaga Desa. Prasyarat Balai Kota Kecil.",
-        (ProjectId::CityHall, Lang::En) => "Advances your city to Town (unlocks Mining & Lv 30 cap; requires Market Hall).",
-        (ProjectId::CityHall, Lang::Id) => "Naikkan kota ke Kota Kecil (buka Mining & cap Lv 30; butuh Pasar Desa).",
-        (ProjectId::TradePort, Lang::En) => "Advances your city to Trade City (Lv 40 activity cap).",
-        (ProjectId::TradePort, Lang::Id) => "Naikkan kota ke Kota Dagang (cap aktivitas Lv 40).",
-        (ProjectId::MetropolisTower, Lang::En) => "Advances your city to Metropolis (Lv 50 activity cap).",
-        (ProjectId::MetropolisTower, Lang::Id) => "Naikkan kota ke Metropolis (cap aktivitas Lv 50).",
+        (ProjectId::Well, Lang::En) => "+10% Farming & Gathering yield. Prerequisite for Village Hall.",
+        (ProjectId::Well, Lang::Id) => "Bonus +10% yield Farming & Gathering. Prasyarat Balai Kampung.",
+        (ProjectId::Granary, Lang::En) => "+4 bag slots & +3% all activity yield per level (max Lv 5).",
+        (ProjectId::Granary, Lang::Id) => "Menambah +4 slot tas & +3% yield semua aktivitas per level (maks Lv 5).",
+        (ProjectId::TownHall, Lang::En) => "Advances city to Village (unlocks Fishing, 3 Activity Slots, Lv 20 cap; needs Well & Granary).",
+        (ProjectId::TownHall, Lang::Id) => "Naikkan kota ke Desa (buka Fishing, 3 Slot Aktivitas, cap Lv 20; butuh Sumur & Lumbung).",
+        (ProjectId::MarketHall, Lang::En) => "+5% direct NPC sell price. Prerequisite for Town Hall.",
+        (ProjectId::MarketHall, Lang::Id) => "Bonus +5% harga jual ke NPC. Prasyarat Balai Kota Kecil.",
+        (ProjectId::CityHall, Lang::En) => "Advances city to Town (unlocks Mining, 4 Activity Slots, Lv 30 cap; needs Market Hall).",
+        (ProjectId::CityHall, Lang::Id) => "Naikkan kota ke Kota Kecil (buka Mining, 4 Slot Aktivitas, cap Lv 30; butuh Pasar Desa).",
+        (ProjectId::TradePort, Lang::En) => "Advances city to Trade City (Lv 40 cap, 3 Craft Slots, +15% NPC Order rewards).",
+        (ProjectId::TradePort, Lang::Id) => "Naikkan kota ke Kota Dagang (cap Lv 40, 3 Slot Craft, +15% hadiah Pesanan NPC).",
+        (ProjectId::MetropolisTower, Lang::En) => "Advances city to Metropolis (Lv 50 cap, +15% Activity & Craft speed).",
+        (ProjectId::MetropolisTower, Lang::Id) => "Naikkan kota ke Metropolis (cap Lv 50, +15% kecepatan Aktivitas & Craft).",
     }
 }
 
@@ -245,6 +245,32 @@ pub fn world_event_name(event: WorldEvent, lang: Lang) -> &'static str {
         (WorldEvent::StormShortage, Lang::Id) => "Badai Laut & Hutan",
         (WorldEvent::MiningBoom, Lang::En) => "Mining Boom",
         (WorldEvent::MiningBoom, Lang::Id) => "Demam Tambang",
+    }
+}
+
+pub fn season_bonus_hint(season: Season, lang: Lang) -> &'static str {
+    match (season, lang) {
+        (Season::Spring, Lang::En) => "+10% Potato, Berries, Herb",
+        (Season::Spring, Lang::Id) => "+10% Kentang, Buah, Herba",
+        (Season::Summer, Lang::En) => "+12% Fish",
+        (Season::Summer, Lang::Id) => "+12% Ikan",
+        (Season::Autumn, Lang::En) => "+15% Wheat, Flour, Bread",
+        (Season::Autumn, Lang::Id) => "+15% Gandum, Tepung, Roti",
+        (Season::Winter, Lang::En) => "+15% Wood, Plank, Minerals",
+        (Season::Winter, Lang::Id) => "+15% Kayu, Papan, Tambang",
+    }
+}
+
+pub fn event_bonus_hint(event: WorldEvent, lang: Lang) -> &'static str {
+    match (event, lang) {
+        (WorldEvent::HarvestFestival, Lang::En) => "+20% Wheat, Potato, Bread",
+        (WorldEvent::HarvestFestival, Lang::Id) => "+20% Gandum, Kentang, Roti",
+        (WorldEvent::MerchantCaravan, Lang::En) => "+15% Bread, Crate, Tonic",
+        (WorldEvent::MerchantCaravan, Lang::Id) => "+15% Roti, Peti, Tonik",
+        (WorldEvent::StormShortage, Lang::En) => "+20% Wood, River Fish, Silver Carp",
+        (WorldEvent::StormShortage, Lang::Id) => "+20% Kayu, Ikan Sungai, Gurame",
+        (WorldEvent::MiningBoom, Lang::En) => "+20% Mining Minerals",
+        (WorldEvent::MiningBoom, Lang::Id) => "+20% Hasil Tambang",
     }
 }
 

@@ -57,7 +57,7 @@ async fn full_activity_flow_survives_restart(pool: PgPool) {
 
     let sums = activities::collect_ready(&pool, 11).await.unwrap();
     assert_eq!(sums.len(), 1);
-    assert_eq!(sums[0].xp_gain, 10);
+    assert_eq!(sums[0].xp_gain, 35);
     assert!(!sums[0].items.is_empty());
 
     let inv = inventory::view(&pool, 11).await.unwrap();
@@ -65,8 +65,8 @@ async fn full_activity_flow_survives_restart(pool: PgPool) {
 
     let ov = activities::overview(&pool, 11).await.unwrap();
     assert!(ov.runs.is_empty(), "slot harus bebas setelah reward diambil");
-    assert_eq!(ov.progress[0].state.xp, 10);
-    assert_eq!(player::get_player(&pool, 11).await.unwrap().unwrap().xp, 10);
+    assert_eq!(ov.progress[0].state.xp, 35);
+    assert_eq!(player::get_player(&pool, 11).await.unwrap().unwrap().xp, 35);
 
     // Klaim kedua tidak memberi apa pun.
     assert!(activities::collect_ready(&pool, 11).await.unwrap().is_empty());

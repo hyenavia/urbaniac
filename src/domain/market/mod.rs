@@ -1,23 +1,24 @@
 use rust_decimal::Decimal;
 
 pub const MARKET_TICK_SECS: i64 = 900; // 15 menit (diskalakan ACTIVITY_DURATION_PCT)
+pub const TICKS_PER_CALENDAR_DAY: i64 = 8; // 8 tick * 15 menit = 2 jam per hari kalender
 pub const MAX_ACTIVE_LISTINGS: i64 = 5;
-pub const LISTING_FEE_PCT: i64 = 2;
-pub const MIN_LISTING_FEE_CENTS: i64 = 100; // 1.00 Bac
-pub const BROKER_COMMISSION_PCT: i64 = 5;
+pub const LISTING_FEE_PCT: i64 = 1;
+pub const MIN_LISTING_FEE_CENTS: i64 = 50; // 0.50 Bac
+pub const BROKER_COMMISSION_PCT: i64 = 3;
 
-/// Batas multiplier harga dinamis NPC (0.70x .. 1.50x harga dasar).
+/// Batas multiplier harga dinamis NPC (0.70x .. 1.60x harga dasar).
 pub fn min_multiplier() -> Decimal {
     Decimal::new(7000, 4)
 }
 
 pub fn max_multiplier() -> Decimal {
-    Decimal::new(15000, 4)
+    Decimal::new(16000, 4)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ListingDuration {
-    Short,  // 1 jam
+    Short,  // 2 jam
     Medium, // 6 jam
     Long,   // 24 jam
 }
@@ -25,7 +26,7 @@ pub enum ListingDuration {
 impl ListingDuration {
     pub fn as_str(&self) -> &'static str {
         match self {
-            ListingDuration::Short => "1h",
+            ListingDuration::Short => "2h",
             ListingDuration::Medium => "6h",
             ListingDuration::Long => "24h",
         }
@@ -33,7 +34,7 @@ impl ListingDuration {
 
     pub fn parse(s: &str) -> Option<Self> {
         match s {
-            "1h" => Some(ListingDuration::Short),
+            "2h" | "1h" => Some(ListingDuration::Short),
             "6h" => Some(ListingDuration::Medium),
             "24h" => Some(ListingDuration::Long),
             _ => None,
@@ -42,7 +43,7 @@ impl ListingDuration {
 
     pub fn secs(&self) -> i64 {
         match self {
-            ListingDuration::Short => 3600,
+            ListingDuration::Short => 7200,
             ListingDuration::Medium => 21_600,
             ListingDuration::Long => 86_400,
         }
@@ -50,7 +51,7 @@ impl ListingDuration {
 
     pub fn label(&self) -> &'static str {
         match self {
-            ListingDuration::Short => "1 Jam",
+            ListingDuration::Short => "2 Jam",
             ListingDuration::Medium => "6 Jam",
             ListingDuration::Long => "24 Jam",
         }
@@ -116,12 +117,12 @@ mod tests {
 
     #[test]
     fn listing_fee_and_commission_math() {
-        assert_eq!(calc_listing_fee(Decimal::new(300, 2), 1), Decimal::new(100, 2)); // min 1.00
-        assert_eq!(calc_listing_fee(Decimal::new(1000, 2), 10), Decimal::new(200, 2)); // 2% of 100 = 2.00
+        assert_eq!(calc_listing_fee(Decimal::new(300, 2), 1), Decimal::new(50, 2)); // min 0.50
+        assert_eq!(calc_listing_fee(Decimal::new(1000, 2), 10), Decimal::new(100, 2)); // 1% of 100 = 1.00
 
         let (gross, comm, net) = calc_sale_settlement(Decimal::new(1000, 2), 10);
         assert_eq!(gross, Decimal::new(10000, 2));
-        assert_eq!(comm, Decimal::new(500, 2));
-        assert_eq!(net, Decimal::new(9500, 2));
+        assert_eq!(comm, Decimal::new(300, 2));
+        assert_eq!(net, Decimal::new(9700, 2));
     }
 }
