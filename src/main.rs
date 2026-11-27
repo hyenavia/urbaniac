@@ -3,7 +3,8 @@ use serenity::all::Http;
 use std::sync::{Arc, OnceLock};
 use tokio::sync::Notify;
 use tracing_subscriber::EnvFilter;
-use urbaniac::{bot, config::Config, infrastructure::database, workers};
+use urbaniac::web::events::EventHub;
+use urbaniac::{bot, config::Config, infrastructure::database, web, workers};
 
 #[tokio::main(worker_threads = 2)]
 async fn main() -> Result<()> {
@@ -19,12 +20,31 @@ async fn main() -> Result<()> {
     // Satu instance scheduler. Job yang tertunda saat bot mati akan diproses saat start.
     let notify = Arc::new(Notify::new());
     let http_slot: Arc<OnceLock<Arc<Http>>> = Arc::new(OnceLock::new());
-    tokio::spawn(workers::run_scheduler(
+    let events = if cfg.activity.enabled {
+        Some(Arc::new(EventHub::default()))
+    } else {
+        None
+    };
+
+    tokio::spawn(workers::run_scheduler_with_events(
         pool.clone(),
         notify.clone(),
         cfg.activity_duration_pct,
         http_slot.clone(),
+        events.clone(),
     ));
+
+    if let Some(hub) = events {
+        let activity_cfg = cfg.activity.clone();
+        let web_pool = pool.clone();
+        let web_notify = notify.clone();
+        let duration_pct = cfg.activity_duration_pct;
+        tokio::spawn(async move {
+            if let Err(e) = web::run(activity_cfg, web_pool, web_notify, duration_pct, hub).await {
+                tracing::error!(error = ?e, "web Activity API berhenti dengan error");
+            }
+        });
+    }
 
     tracing::info!("database siap, menjalankan bot");
     bot::run(cfg, pool, notify, http_slot).await

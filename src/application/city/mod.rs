@@ -73,6 +73,26 @@ pub struct CityOverview {
     pub running_project: Option<RunningProjectView>,
 }
 
+pub struct ProjectQuoteItem {
+    pub item_id: &'static str,
+    pub need: i64,
+    pub have: i64,
+}
+
+pub struct ProjectQuoteView {
+    pub project: ProjectId,
+    pub current_level: i32,
+    pub next_level: Option<i32>,
+    pub max_level: i32,
+    pub min_stage: CityStage,
+    pub cost_bac: Decimal,
+    pub available_bac: Decimal,
+    pub duration_secs: i64,
+    pub items: Vec<ProjectQuoteItem>,
+    pub can_start: bool,
+    pub block_reason: Option<String>,
+}
+
 /// Mengambil CityStage pemain dari database (default Kampung jika belum ada).
 pub async fn stage_for_conn(conn: &mut PgConnection, player_id: i64) -> sqlx::Result<CityStage> {
     let raw = city_repo::get_stage(conn, player_id).await?;
@@ -173,8 +193,8 @@ pub async fn start_project(
 
     let pdef = def(project);
     let stage = stage_for_conn(&mut *tx, player_id).await?;
-    if stage < pdef.min_stage {
-        return Err(CityError::StageTooLow(pdef.min_stage));
+    if let Err(err) = validate_project_prereqs(&mut *tx, player_id, project, stage).await {
+        return Err(err);
     }
 
     let existing_lvl = city_repo::facility_level(&mut *tx, player_id, project.as_str()).await?;
@@ -182,39 +202,6 @@ pub async fn start_project(
         return Err(CityError::AlreadyBuilt(pdef.name));
     }
     let next_level = existing_lvl + 1;
-
-    match project {
-        ProjectId::TownHall => {
-            if stage != CityStage::Kampung {
-                return Err(CityError::StageAlreadyAdvanced);
-            }
-            let well_lvl =
-                city_repo::facility_level(&mut *tx, player_id, ProjectId::Well.as_str()).await?;
-            let granary_lvl =
-                city_repo::facility_level(&mut *tx, player_id, ProjectId::Granary.as_str()).await?;
-            if well_lvl == 0 || granary_lvl == 0 {
-                return Err(CityError::MissingPrerequisites);
-            }
-        }
-        ProjectId::CityHall => {
-            if stage != CityStage::Desa {
-                return Err(CityError::StageAlreadyAdvanced);
-            }
-            let mh_lvl =
-                city_repo::facility_level(&mut *tx, player_id, ProjectId::MarketHall.as_str())
-                    .await?;
-            if mh_lvl == 0 {
-                return Err(CityError::MissingPrerequisites);
-            }
-        }
-        ProjectId::TradePort if stage != CityStage::KotaKecil => {
-            return Err(CityError::StageAlreadyAdvanced);
-        }
-        ProjectId::MetropolisTower if stage != CityStage::KotaDagang => {
-            return Err(CityError::StageAlreadyAdvanced);
-        }
-        _ => {}
-    }
 
     let cost_bac = project_cost_bac_for_level(pdef, next_level);
     let treasury = city_repo::get(&mut *tx, player_id)
@@ -291,6 +278,194 @@ pub async fn start_project(
     scheduler::enqueue(&mut *tx, JOB_CITY_PROJECT_COMPLETE, id, ends_at).await?;
     tx.commit().await?;
     Ok(RunningProjectView { id, project, ends_at })
+}
+
+async fn validate_project_prereqs(
+    conn: &mut PgConnection,
+    player_id: i64,
+    project: ProjectId,
+    stage: CityStage,
+) -> Result<(), CityError> {
+    let pdef = def(project);
+    if stage < pdef.min_stage {
+        return Err(CityError::StageTooLow(pdef.min_stage));
+    }
+    match project {
+        ProjectId::TownHall => {
+            if stage != CityStage::Kampung {
+                return Err(CityError::StageAlreadyAdvanced);
+            }
+            let well_lvl =
+                city_repo::facility_level(conn, player_id, ProjectId::Well.as_str()).await?;
+            let granary_lvl =
+                city_repo::facility_level(conn, player_id, ProjectId::Granary.as_str()).await?;
+            if well_lvl == 0 || granary_lvl == 0 {
+                return Err(CityError::MissingPrerequisites);
+            }
+        }
+        ProjectId::CityHall => {
+            if stage != CityStage::Desa {
+                return Err(CityError::StageAlreadyAdvanced);
+            }
+            let mh_lvl =
+                city_repo::facility_level(conn, player_id, ProjectId::MarketHall.as_str()).await?;
+            if mh_lvl == 0 {
+                return Err(CityError::MissingPrerequisites);
+            }
+        }
+        ProjectId::TradePort if stage != CityStage::KotaKecil => {
+            return Err(CityError::StageAlreadyAdvanced);
+        }
+        ProjectId::MetropolisTower if stage != CityStage::KotaDagang => {
+            return Err(CityError::StageAlreadyAdvanced);
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+async fn quote_conn(
+    conn: &mut PgConnection,
+    player_id: i64,
+    project: ProjectId,
+    duration_pct: i64,
+    stage: CityStage,
+    available_bac: Decimal,
+    running_name: Option<&str>,
+) -> anyhow::Result<ProjectQuoteView> {
+    let pdef = def(project);
+    let current_level = city_repo::facility_level(conn, player_id, project.as_str()).await?;
+    if current_level >= pdef.max_level {
+        return Ok(ProjectQuoteView {
+            project,
+            current_level,
+            next_level: None,
+            max_level: pdef.max_level,
+            min_stage: pdef.min_stage,
+            cost_bac: Decimal::ZERO,
+            available_bac,
+            duration_secs: 0,
+            items: Vec::new(),
+            can_start: false,
+            block_reason: Some(CityError::AlreadyBuilt(pdef.name).to_string()),
+        });
+    }
+
+    let next_level = current_level + 1;
+    let cost_bac = project_cost_bac_for_level(pdef, next_level);
+    let duration_secs = (pdef.duration_secs * duration_pct.max(1) / 100).max(1);
+    let mut items = Vec::with_capacity(pdef.cost_items.len());
+    let mut missing_item: Option<(&'static str, i64, i64)> = None;
+    for (item_id, need) in pdef.cost_items {
+        let total_need = *need * (next_level as i64);
+        let have = inventory_repo::quantity_of(conn, player_id, item_id).await?;
+        if missing_item.is_none() && have < total_need {
+            let name = find_item(item_id).map(|i| i.name).unwrap_or(item_id);
+            missing_item = Some((name, total_need, have));
+        }
+        items.push(ProjectQuoteItem { item_id, need: total_need, have });
+    }
+
+    let block_reason = if let Some(name) = running_name {
+        Some(CityError::ProjectAlreadyRunning(name.to_string()).to_string())
+    } else if let Err(err) = validate_project_prereqs(conn, player_id, project, stage).await {
+        Some(err.to_string())
+    } else if available_bac < cost_bac {
+        Some(CityError::InsufficientBac { need: cost_bac, have: available_bac }.to_string())
+    } else {
+        missing_item.map(|(name, need, have)| {
+            CityError::InsufficientItem { name, need, have }.to_string()
+        })
+    };
+
+    Ok(ProjectQuoteView {
+        project,
+        current_level,
+        next_level: Some(next_level),
+        max_level: pdef.max_level,
+        min_stage: pdef.min_stage,
+        cost_bac,
+        available_bac,
+        duration_secs,
+        items,
+        can_start: block_reason.is_none(),
+        block_reason,
+    })
+}
+
+pub async fn quote_all(
+    pool: &PgPool,
+    player_id: i64,
+    duration_pct: i64,
+) -> anyhow::Result<Vec<ProjectQuoteView>> {
+    let mut conn = pool.acquire().await?;
+    let stage = stage_for_conn(&mut *conn, player_id).await?;
+    let treasury = city_repo::get(&mut *conn, player_id)
+        .await?
+        .map(|c| c.treasury)
+        .unwrap_or(Decimal::ZERO);
+    let wallet = wallet_repo::balance(&mut *conn, player_id)
+        .await?
+        .unwrap_or(Decimal::ZERO);
+    let available_bac = treasury + wallet;
+    let running_name = city_repo::get_running_project(&mut *conn, player_id)
+        .await?
+        .map(|r| {
+            ProjectId::parse(&r.project_id)
+                .map(|p| p.name().to_string())
+                .unwrap_or(r.project_id)
+        });
+    let mut out = Vec::with_capacity(ProjectId::ALL.len());
+    for project in ProjectId::ALL {
+        out.push(
+            quote_conn(
+                &mut *conn,
+                player_id,
+                project,
+                duration_pct,
+                stage,
+                available_bac,
+                running_name.as_deref(),
+            )
+            .await?,
+        );
+    }
+    Ok(out)
+}
+
+pub async fn quote(
+    pool: &PgPool,
+    player_id: i64,
+    project: ProjectId,
+    duration_pct: i64,
+) -> anyhow::Result<ProjectQuoteView> {
+    let mut conn = pool.acquire().await?;
+    let stage = stage_for_conn(&mut *conn, player_id).await?;
+    let treasury = city_repo::get(&mut *conn, player_id)
+        .await?
+        .map(|c| c.treasury)
+        .unwrap_or(Decimal::ZERO);
+    let wallet = wallet_repo::balance(&mut *conn, player_id)
+        .await?
+        .unwrap_or(Decimal::ZERO);
+    let available_bac = treasury + wallet;
+    let running_name = city_repo::get_running_project(&mut *conn, player_id)
+        .await?
+        .map(|r| {
+            ProjectId::parse(&r.project_id)
+                .map(|p| p.name().to_string())
+                .unwrap_or(r.project_id)
+        });
+    quote_conn(
+        &mut *conn,
+        player_id,
+        project,
+        duration_pct,
+        stage,
+        available_bac,
+        running_name.as_deref(),
+    )
+    .await
 }
 
 /// Dipanggil worker di dalam transaksi job. Idempoten: hanya memproses proyek berstatus 'running'.

@@ -1,2 +1,8 @@
 /target
 .env
+.env.*
+!.env.example
+activity/node_modules/
+activity/dist/
+activity/.env*.local
+activity/*.tsbuildinfo

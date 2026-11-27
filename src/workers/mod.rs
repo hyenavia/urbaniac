@@ -2,6 +2,7 @@
 //! scheduler tidur sampai job berikutnya jatuh tempo (atau dibangunkan lewat Notify).
 use crate::application::{activities, city, crafting, market};
 use crate::infrastructure::scheduler::{self, DueJob};
+use crate::web::events::{EventHub, RealtimeEvent};
 use chrono::Utc;
 use serenity::all::{Http, UserId};
 use sqlx::PgPool;
@@ -39,6 +40,7 @@ async fn run_job(
     job: &DueJob,
     duration_pct: i64,
     http_slot: &OnceLock<Arc<Http>>,
+    events: Option<&EventHub>,
 ) -> anyhow::Result<()> {
     let mut tx = pool.begin().await?;
     if !scheduler::lock_pending(&mut *tx, job.id).await? {
@@ -80,6 +82,51 @@ async fn run_job(
     };
     scheduler::mark_done(&mut *tx, job.id).await?;
     tx.commit().await?;
+
+    if let Some(hub) = events {
+        let ev_kind = match job.kind.as_str() {
+            activities::JOB_ACTIVITY_COMPLETE => "activity_complete",
+            city::JOB_CITY_PROJECT_COMPLETE => "city_project_complete",
+            city::JOB_CITY_ECONOMY_TICK => "city_economy_tick",
+            crafting::JOB_CRAFT_COMPLETE => "craft_complete",
+            market::JOB_BROKER_EXPIRE => "broker_expire",
+            market::JOB_MARKET_TICK => "market_tick",
+            _ => "state_sync",
+        };
+        if notes.is_empty() {
+            if matches!(
+                job.kind.as_str(),
+                market::JOB_MARKET_TICK
+                    | city::JOB_CITY_ECONOMY_TICK
+                    | activities::JOB_ACTIVITY_COMPLETE
+            ) {
+                hub.publish(RealtimeEvent {
+                    player_id: None,
+                    kind: "state_sync",
+                    message: None,
+                });
+            }
+        } else {
+            for (pid, msg) in &notes {
+                hub.publish(RealtimeEvent {
+                    player_id: Some(*pid),
+                    kind: ev_kind,
+                    message: Some(msg.replace("**", "")),
+                });
+            }
+            if matches!(
+                job.kind.as_str(),
+                market::JOB_MARKET_TICK | city::JOB_CITY_ECONOMY_TICK
+            ) {
+                hub.publish(RealtimeEvent {
+                    player_id: None,
+                    kind: "state_sync",
+                    message: None,
+                });
+            }
+        }
+    }
+
     send_notifications(http_slot, notes).await;
     Ok(())
 }
@@ -89,8 +136,9 @@ async fn process_job(
     job: &DueJob,
     duration_pct: i64,
     http_slot: &OnceLock<Arc<Http>>,
+    events: Option<&EventHub>,
 ) {
-    if let Err(e) = run_job(pool, job, duration_pct, http_slot).await {
+    if let Err(e) = run_job(pool, job, duration_pct, http_slot, events).await {
         tracing::error!(job_id = job.id, error = ?e, "job gagal");
         if let Ok(mut conn) = pool.acquire().await {
             let _ = scheduler::record_failure(&mut *conn, job.id, &format!("{e:#}")).await;
@@ -110,6 +158,15 @@ pub async fn process_due_batch_with_pct(
     duration_pct: i64,
     http_slot: &Arc<OnceLock<Arc<Http>>>,
 ) -> anyhow::Result<usize> {
+    process_due_batch_internal(pool, duration_pct, http_slot, None).await
+}
+
+async fn process_due_batch_internal(
+    pool: &PgPool,
+    duration_pct: i64,
+    http_slot: &Arc<OnceLock<Arc<Http>>>,
+    events: Option<&Arc<EventHub>>,
+) -> anyhow::Result<usize> {
     let jobs = {
         let mut conn = pool.acquire().await?;
         scheduler::due_jobs(&mut *conn, BATCH_SIZE).await?
@@ -121,7 +178,10 @@ pub async fn process_due_batch_with_pct(
             let pool = pool.clone();
             let job = job.clone();
             let http = http_slot.clone();
-            set.spawn(async move { process_job(&pool, &job, duration_pct, &http).await });
+            let ev = events.cloned();
+            set.spawn(async move {
+                process_job(&pool, &job, duration_pct, &http, ev.as_deref()).await
+            });
         }
         while let Some(res) = set.join_next().await {
             if let Err(e) = res {
@@ -138,6 +198,16 @@ pub async fn run_scheduler(
     duration_pct: i64,
     http_slot: Arc<OnceLock<Arc<Http>>>,
 ) {
+    run_scheduler_with_events(pool, notify, duration_pct, http_slot, None).await;
+}
+
+pub async fn run_scheduler_with_events(
+    pool: PgPool,
+    notify: Arc<Notify>,
+    duration_pct: i64,
+    http_slot: Arc<OnceLock<Arc<Http>>>,
+    events: Option<Arc<EventHub>>,
+) {
     tracing::info!("scheduler berjalan");
     if let Err(e) = market::ensure_market_tick_scheduled(&pool, duration_pct).await {
         tracing::error!(error = ?e, "gagal menjadwalkan market_tick awal");
@@ -146,7 +216,7 @@ pub async fn run_scheduler(
         tracing::error!(error = ?e, "gagal menjadwalkan city_economy_tick awal");
     }
     loop {
-        match process_due_batch_with_pct(&pool, duration_pct, &http_slot).await {
+        match process_due_batch_internal(&pool, duration_pct, &http_slot, events.as_ref()).await {
             Ok(n) if n > 0 => continue, // mungkin masih ada yang jatuh tempo
             Ok(_) => {}
             Err(e) => {

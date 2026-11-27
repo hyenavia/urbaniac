@@ -10,6 +10,7 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "build.rs"
+      - "activity/**"
       - ".github/workflows/build-release.yml"
   workflow_dispatch:
 
@@ -43,16 +44,72 @@ jobs:
       - name: Build release executable
         run: cargo build --release --target x86_64-pc-windows-msvc
 
-      - name: Verify executable
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: "activity/package-lock.json"
+
+      - name: Install frontend dependencies and build
+        working-directory: activity
+        env:
+          VITE_USE_MOCK_API: "false"
+          VITE_DISCORD_CLIENT_ID: ${{ vars.VITE_DISCORD_CLIENT_ID }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Verify, package, and generate checksums & manifest
         shell: pwsh
         run: |
           $exe = "target/x86_64-pc-windows-msvc/release/urbaniac.exe"
           if (-not (Test-Path $exe)) {
             throw "Build succeeded but executable was not found: $exe"
           }
-          Get-Item $exe | Select-Object FullName, Length
-          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  urbaniac.exe" | Set-Content "target/SHA256SUMS.txt" -Encoding ascii
+          if (-not (Test-Path "activity/dist/index.html")) {
+            throw "Frontend build succeeded but activity/dist/index.html was not found."
+          }
+
+          $frontendZip = "target/frontend-dist.zip"
+          if (Test-Path $frontendZip) {
+            Remove-Item $frontendZip -Force
+          }
+          Compress-Archive -Path "activity/dist/*" -DestinationPath $frontendZip -Force
+
+          $exeHash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $feHash = (Get-FileHash $frontendZip -Algorithm SHA256).Hash.ToLowerInvariant()
+
+          @(
+            "$exeHash  urbaniac.exe"
+            "$feHash  frontend-dist.zip"
+          ) | Set-Content "target/SHA256SUMS.txt" -Encoding ascii
+          "$feHash  frontend-dist.zip" | Set-Content "target/frontend-dist.zip.sha256" -Encoding ascii
+
+          function Get-TreeSha256([string[]]$Paths) {
+            $lines = (& git ls-tree HEAD -- @Paths) -join "`n"
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($lines)
+            $sha = [System.Security.Cryptography.SHA256]::Create()
+            try {
+              $hashBytes = $sha.ComputeHash($bytes)
+            } finally {
+              $sha.Dispose()
+            }
+            return ([System.BitConverter]::ToString($hashBytes) -replace "-", "").ToLowerInvariant()
+          }
+
+          $backendTreeHash = Get-TreeSha256 @("src", "migrations", "Cargo.toml", "Cargo.lock", "build.rs")
+          $frontendTreeHash = Get-TreeSha256 @("activity")
+
+          @{
+            commit             = "${{ github.sha }}"
+            backend_tree_hash  = $backendTreeHash
+            frontend_tree_hash = $frontendTreeHash
+            exe_sha256         = $exeHash
+            frontend_sha256    = $feHash
+          } | ConvertTo-Json -Depth 4 | Set-Content "target/release-manifest.json" -Encoding utf8
+
+          Get-Item $exe, $frontendZip | Select-Object FullName, Length
 
       - name: Publish commit-specific GitHub Release
         uses: softprops/action-gh-release@v2
@@ -66,4 +123,7 @@ jobs:
           files: |
             target/x86_64-pc-windows-msvc/release/urbaniac.exe
             target/SHA256SUMS.txt
+            target/frontend-dist.zip
+            target/frontend-dist.zip.sha256
+            target/release-manifest.json
           fail_on_unmatched_files: true
