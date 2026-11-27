@@ -28,3 +28,7 @@ Semua perubahan skema dikelola lewat file migrasi SQLx berurutan di `migrations/
 - **`city_treasury_ledger`**: ledger terpisah untuk City Treasury (`idempotency_key UNIQUE`).
 - **`city_facilities`**: fasilitas yang sudah dibangun (`PK (player_id, facility_id)`, `level`).
 - **`city_projects`**: proyek pembangunan kota (`status`: `running` | `completed`, partial unique index `WHERE status = 'running'` membatasi 1 proyek berjalan per pemain).
+
+### `0007_market.sql`
+- **`npc_market_prices`**: harga dinamis NPC per item (`item_id` PK, `multiplier` 0.6000..1.6000, `recent_sales` tekanan suplai).
+- **`broker_listings`**: listing Makelar (`player_id`, `item_id`, `quantity`, `target_unit_price`, `listing_fee`, `status`: `active` | `sold` | `expired` | `cancelled`, `sold_unit_price`, `commission`, `expires_at`).

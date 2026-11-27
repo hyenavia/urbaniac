@@ -1,12 +1,14 @@
 use crate::application::economy::{self, SaleOutcome, SellError, SellQty};
-use crate::application::{activities, city, inventory, player};
+use crate::application::{activities, city, inventory, market, player};
 use crate::bot::{commands, components, embeds, AppState};
 use crate::domain::activities::ActivityKind;
 use crate::domain::city::ProjectId;
 use crate::domain::economy::format_bac;
+use crate::domain::market::{calc_listing_fee, ListingDuration};
 use crate::domain::resources::find_item;
 use rust_decimal::Decimal;
 use serenity::all::*;
+use std::collections::HashMap;
 
 pub async fn handle_command(
     ctx: &Context,
@@ -60,6 +62,24 @@ async fn show_city(
 ) -> anyhow::Result<()> {
     let ov = city::overview(&app.pool, id).await?;
     update(ctx, c, embeds::city(&ov, note), components::city_menu(id as u64)).await
+}
+
+async fn show_market(
+    ctx: &Context,
+    c: &ComponentInteraction,
+    app: &AppState,
+    id: i64,
+    note: Option<String>,
+) -> anyhow::Result<()> {
+    let ov = market::overview(&app.pool, id).await?;
+    let has_listings = !ov.listings.is_empty();
+    update(
+        ctx,
+        c,
+        embeds::market(&ov, note),
+        components::market_menu(id as u64, has_listings),
+    )
+    .await
 }
 
 pub async fn handle_component(
@@ -178,12 +198,21 @@ pub async fn handle_component(
                 )
                 .await;
             }
+            let ov = market::overview(&app.pool, id).await?;
+            let price_map: HashMap<&'static str, Decimal> =
+                ov.prices.iter().map(|p| (p.item.id, p.current_price)).collect();
             let items: Vec<(String, String, i64)> = v
                 .lines
                 .iter()
                 .map(|l| (l.item.name.to_string(), l.item.id.to_string(), l.quantity))
                 .collect();
-            update(ctx, c, embeds::sell_prompt(&v), components::sell_select(owner, &items)).await
+            update(
+                ctx,
+                c,
+                embeds::sell_prompt(&v, &price_map),
+                components::sell_select(owner, &items),
+            )
+            .await
         }
         "sellpick" => {
             let picked = match &c.data.kind {
@@ -198,7 +227,187 @@ pub async fn handle_component(
                 .find(|l| l.item.id == item.id)
                 .map(|l| l.quantity)
                 .unwrap_or(0);
-            update(ctx, c, embeds::sell_item(item, owned), components::sell_qty(owner, item.id)).await
+            let unit_price = market::current_npc_price(&app.pool, item).await?;
+            update(
+                ctx,
+                c,
+                embeds::sell_item(item, owned, unit_price),
+                components::sell_qty(owner, item.id),
+            )
+            .await
+        }
+        "market" => show_market(ctx, c, app, id, None).await,
+        "mktnew" => {
+            let v = inventory::view(&app.pool, id).await?;
+            if v.lines.is_empty() {
+                return show_market(
+                    ctx,
+                    c,
+                    app,
+                    id,
+                    Some("Inventory kosong, tidak ada item untuk dititipkan ke Makelar.".to_string()),
+                )
+                .await;
+            }
+            let items: Vec<(String, String, i64)> = v
+                .lines
+                .iter()
+                .map(|l| (l.item.name.to_string(), l.item.id.to_string(), l.quantity))
+                .collect();
+            update(
+                ctx,
+                c,
+                embeds::notice("Titip ke Makelar", "Pilih item dari inventory yang ingin dititipkan."),
+                components::broker_item_select(owner, &items),
+            )
+            .await
+        }
+        "mktpick" => {
+            let picked = match &c.data.kind {
+                ComponentInteractionDataKind::StringSelect { values } => values.first().cloned(),
+                _ => None,
+            };
+            let Some(item) = picked.as_deref().and_then(find_item) else { return Ok(()) };
+            let owned = inventory::view(&app.pool, id)
+                .await?
+                .lines
+                .iter()
+                .find(|l| l.item.id == item.id)
+                .map(|l| l.quantity)
+                .unwrap_or(0);
+            let cur_price = market::current_npc_price(&app.pool, item).await?;
+            update(
+                ctx,
+                c,
+                embeds::notice(
+                    &format!("Titip {} ke Makelar", item.name),
+                    &format!(
+                        "Kamu punya **{}**. Harga pasar saat ini: {}/unit.\nPilih jumlah yang ingin dititipkan:",
+                        owned,
+                        format_bac(cur_price)
+                    ),
+                ),
+                components::broker_qty_select(owner, item.id, owned),
+            )
+            .await
+        }
+        "mktqty" => {
+            let Some((item_id, qty_s)) = rest.split_once(':') else { return Ok(()) };
+            let Some(item) = find_item(item_id) else { return Ok(()) };
+            let Ok(qty) = qty_s.parse::<i64>() else { return Ok(()) };
+            let cur_price = market::current_npc_price(&app.pool, item).await?;
+            let p110 = (cur_price * Decimal::new(110, 2)).round_dp(2);
+            let p125 = (cur_price * Decimal::new(125, 2)).round_dp(2);
+            let p140 = (cur_price * Decimal::new(140, 2)).round_dp(2);
+            let desc = format!(
+                "Item: **{} × {}**\nHarga pasar sekarang: {}/unit\n\n\
+                 • **+10% (1 Jam)**: target {}/unit (fee {})\n\
+                 • **+25% (6 Jam)**: target {}/unit (fee {})\n\
+                 • **+40% (24 Jam)**: target {}/unit (fee {})",
+                item.name,
+                qty,
+                format_bac(cur_price),
+                format_bac(p110),
+                format_bac(calc_listing_fee(p110, qty)),
+                format_bac(p125),
+                format_bac(calc_listing_fee(p125, qty)),
+                format_bac(p140),
+                format_bac(calc_listing_fee(p140, qty)),
+            );
+            update(
+                ctx,
+                c,
+                embeds::notice("Pilih Target Harga & Durasi", &desc),
+                components::broker_terms_select(owner, item.id, qty),
+            )
+            .await
+        }
+        "mktpost" => {
+            let parts: Vec<&str> = rest.splitn(4, ':').collect();
+            if parts.len() != 4 {
+                return Ok(());
+            }
+            let Some(item) = find_item(parts[0]) else { return Ok(()) };
+            let Ok(qty) = parts[1].parse::<i64>() else { return Ok(()) };
+            let Ok(pct) = parts[2].parse::<i64>() else { return Ok(()) };
+            let Some(dur) = ListingDuration::parse(parts[3]) else { return Ok(()) };
+
+            let cur_price = market::current_npc_price(&app.pool, item).await?;
+            let target = (cur_price * Decimal::new(pct, 2)).round_dp(2);
+            let key = format!("mktpost:{}", c.id.get());
+            let note = match market::create_listing(
+                &app.pool,
+                id,
+                item.id,
+                qty,
+                target,
+                dur,
+                app.activity_duration_pct,
+                &key,
+            )
+            .await
+            {
+                Ok(l) => {
+                    app.notify.notify_one();
+                    format!(
+                        "Listing #{} dibuat: **{} × {}** target {}/unit (fee {}, habis <t:{}:R>).",
+                        l.id,
+                        l.item.name,
+                        l.quantity,
+                        format_bac(l.target_unit_price),
+                        format_bac(l.listing_fee),
+                        l.expires_at.timestamp()
+                    )
+                }
+                Err(market::MarketError::Db(e)) => return Err(e.into()),
+                Err(market::MarketError::Wallet(e)) => return Err(e.into()),
+                Err(e) => e.to_string(),
+            };
+            show_market(ctx, c, app, id, Some(note)).await
+        }
+        "mktcancel" => {
+            let ov = market::overview(&app.pool, id).await?;
+            if ov.listings.is_empty() {
+                return show_market(ctx, c, app, id, Some("Tidak ada listing aktif.".to_string())).await;
+            }
+            let items: Vec<(i64, String)> = ov
+                .listings
+                .iter()
+                .map(|l| {
+                    (
+                        l.id,
+                        format!("#{} {} × {} ({}/unit)", l.id, l.item.name, l.quantity, format_bac(l.target_unit_price)),
+                    )
+                })
+                .collect();
+            update(
+                ctx,
+                c,
+                embeds::notice("Batalkan Listing", "Pilih listing yang ingin dibatalkan (fee tidak dikembalikan)."),
+                components::broker_cancel_select(owner, &items),
+            )
+            .await
+        }
+        "mktcancelpick" => {
+            let picked = match &c.data.kind {
+                ComponentInteractionDataKind::StringSelect { values } => values.first().cloned(),
+                _ => None,
+            };
+            let Some(listing_id) = picked.and_then(|s| s.parse::<i64>().ok()) else { return Ok(()) };
+            let note = match market::cancel_listing(&app.pool, id, listing_id).await {
+                Ok((item, stored, pending)) if pending > 0 => format!(
+                    "Listing #{} dibatalkan. {} +{} kembali ke inventory, {} masuk Pending Claim.",
+                    listing_id, item.name, stored, pending
+                ),
+                Ok((item, stored, _)) => format!(
+                    "Listing #{} dibatalkan. {} +{} dikembalikan ke inventory.",
+                    listing_id, item.name, stored
+                ),
+                Err(market::MarketError::Db(e)) => return Err(e.into()),
+                Err(market::MarketError::Wallet(e)) => return Err(e.into()),
+                Err(e) => e.to_string(),
+            };
+            show_market(ctx, c, app, id, Some(note)).await
         }
         "sellqty" => {
             let Some((item_id, qty_s)) = rest.split_once(':') else { return Ok(()) };

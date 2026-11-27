@@ -18,9 +18,12 @@ pub fn main_menu(owner: u64) -> Vec<CreateActionRow> {
             btn("inventory", owner, "", "Inventory", ButtonStyle::Secondary),
             btn("activities", owner, "", "Aktivitas", ButtonStyle::Primary),
             btn("city", owner, "", "Kota", ButtonStyle::Primary),
-            btn("sell", owner, "", "Jual", ButtonStyle::Success),
         ]),
-        CreateActionRow::Buttons(vec![btn("claim", owner, "", "Klaim Pending", ButtonStyle::Secondary)]),
+        CreateActionRow::Buttons(vec![
+            btn("market", owner, "", "Pasar & Makelar", ButtonStyle::Success),
+            btn("sell", owner, "", "Jual NPC", ButtonStyle::Success),
+            btn("claim", owner, "", "Klaim Pending", ButtonStyle::Secondary),
+        ]),
     ]
 }
 
@@ -75,6 +78,91 @@ pub fn sell_qty(owner: u64, item_id: &str) -> Vec<CreateActionRow> {
         btn("sellqty", owner, &format!("{item_id}:all"), "Jual Semua", ButtonStyle::Danger),
         btn("sell", owner, "", "Kembali", ButtonStyle::Secondary),
     ])]
+}
+
+pub fn market_menu(owner: u64, has_listings: bool) -> Vec<CreateActionRow> {
+    let mut buttons = vec![btn("mktnew", owner, "", "Titip ke Makelar", ButtonStyle::Success)];
+    if has_listings {
+        buttons.push(btn("mktcancel", owner, "", "Batalkan Listing", ButtonStyle::Danger));
+    }
+    buttons.push(btn("market", owner, "", "Refresh", ButtonStyle::Secondary));
+    buttons.push(btn("profile", owner, "", "Menu Utama", ButtonStyle::Secondary));
+    vec![CreateActionRow::Buttons(buttons)]
+}
+
+pub fn broker_item_select(owner: u64, items: &[(String, String, i64)]) -> Vec<CreateActionRow> {
+    let options: Vec<CreateSelectMenuOption> = items
+        .iter()
+        .take(25)
+        .map(|(name, id, qty)| CreateSelectMenuOption::new(format!("{name} (x{qty})"), id.clone()))
+        .collect();
+    vec![
+        CreateActionRow::SelectMenu(
+            CreateSelectMenu::new(
+                format!("{PREFIX}:mktpick:{owner}"),
+                CreateSelectMenuKind::String { options },
+            )
+            .placeholder("Pilih item untuk dititipkan"),
+        ),
+        CreateActionRow::Buttons(vec![btn("market", owner, "", "Kembali", ButtonStyle::Secondary)]),
+    ]
+}
+
+pub fn broker_qty_select(owner: u64, item_id: &str, owned: i64) -> Vec<CreateActionRow> {
+    let mut buttons = Vec::new();
+    for q in [1, 5, 10, 25] {
+        if owned >= q {
+            buttons.push(btn(
+                "mktqty",
+                owner,
+                &format!("{item_id}:{q}"),
+                &format!("Titip {q}"),
+                ButtonStyle::Primary,
+            ));
+        }
+    }
+    if owned > 0 && !matches!(owned, 1 | 5 | 10 | 25) {
+        buttons.push(btn(
+            "mktqty",
+            owner,
+            &format!("{item_id}:{owned}"),
+            &format!("Semua ({owned})"),
+            ButtonStyle::Primary,
+        ));
+    }
+    vec![
+        CreateActionRow::Buttons(buttons),
+        CreateActionRow::Buttons(vec![btn("market", owner, "", "Kembali", ButtonStyle::Secondary)]),
+    ]
+}
+
+pub fn broker_terms_select(owner: u64, item_id: &str, qty: i64) -> Vec<CreateActionRow> {
+    vec![
+        CreateActionRow::Buttons(vec![
+            btn("mktpost", owner, &format!("{item_id}:{qty}:110:1h"), "+10% (1 Jam)", ButtonStyle::Success),
+            btn("mktpost", owner, &format!("{item_id}:{qty}:125:6h"), "+25% (6 Jam)", ButtonStyle::Success),
+            btn("mktpost", owner, &format!("{item_id}:{qty}:140:24h"), "+40% (24 Jam)", ButtonStyle::Success),
+        ]),
+        CreateActionRow::Buttons(vec![btn("market", owner, "", "Kembali", ButtonStyle::Secondary)]),
+    ]
+}
+
+pub fn broker_cancel_select(owner: u64, listings: &[(i64, String)]) -> Vec<CreateActionRow> {
+    let options: Vec<CreateSelectMenuOption> = listings
+        .iter()
+        .take(25)
+        .map(|(id, label)| CreateSelectMenuOption::new(label.clone(), id.to_string()))
+        .collect();
+    vec![
+        CreateActionRow::SelectMenu(
+            CreateSelectMenu::new(
+                format!("{PREFIX}:mktcancelpick:{owner}"),
+                CreateSelectMenuKind::String { options },
+            )
+            .placeholder("Pilih listing untuk dibatalkan"),
+        ),
+        CreateActionRow::Buttons(vec![btn("market", owner, "", "Kembali", ButtonStyle::Secondary)]),
+    ]
 }
 
 /// Format custom_id: `ub:<aksi>:<owner_discord_id>[:<data>]`. Mengembalikan (aksi, owner, data).

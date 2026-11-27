@@ -1,13 +1,16 @@
 use crate::application::activities::{ActivityOverview, ClaimSummary, RunStatus};
 use crate::application::city::CityOverview;
 use crate::application::inventory::{InventoryLine, InventoryView};
+use crate::application::market::MarketOverview;
 use crate::application::player::ProfileView;
 use crate::bot::branding;
 use crate::domain::city::{def as project_def, project_cost_bac, ProjectId};
-use crate::domain::economy::{format_bac, npc_buy_price};
+use crate::domain::economy::format_bac;
 use crate::domain::player::xp_to_next;
 use crate::domain::resources::{find_item, ItemDef};
+use rust_decimal::Decimal;
 use serenity::all::{CreateEmbed, CreateEmbedFooter};
+use std::collections::HashMap;
 
 pub fn help() -> CreateEmbed {
     branding::styled_embed(branding::COLOR_GENERAL)
@@ -168,26 +171,86 @@ pub fn claim_note(sums: &[ClaimSummary]) -> String {
         .join("\n")
 }
 
-pub fn sell_prompt(v: &InventoryView) -> CreateEmbed {
+pub fn sell_prompt(v: &InventoryView, prices: &HashMap<&'static str, Decimal>) -> CreateEmbed {
     let text = v
         .lines
         .iter()
-        .map(|l| format!("{} × {} — {} / unit", l.item.name, l.quantity, format_bac(npc_buy_price(l.item))))
+        .map(|l| {
+            let price = prices.get(l.item.id).copied().unwrap_or(Decimal::ZERO);
+            format!("{} × {} — {} / unit", l.item.name, l.quantity, format_bac(price))
+        })
         .collect::<Vec<_>>()
         .join("\n");
     branding::styled_embed(branding::COLOR_ECONOMY)
-        .title("Jual ke NPC")
+        .title("Jual ke NPC (Harga Pasar Dinamis)")
         .description(text)
 }
 
-pub fn sell_item(item: &ItemDef, owned: i64) -> CreateEmbed {
+pub fn sell_item(item: &ItemDef, owned: i64, unit_price: Decimal) -> CreateEmbed {
     branding::styled_embed(branding::COLOR_ECONOMY)
         .title(format!("Jual {}", item.name))
         .description(format!(
-            "Kamu punya **{}**. Harga NPC: {} / unit.",
+            "Kamu punya **{}**. Harga NPC saat ini: {} / unit.",
             owned,
-            format_bac(npc_buy_price(item))
+            format_bac(unit_price)
         ))
+}
+
+pub fn market(ov: &MarketOverview, note: Option<String>) -> CreateEmbed {
+    let price_lines = ov
+        .prices
+        .iter()
+        .map(|p| {
+            let pct = ((p.multiplier - Decimal::ONE) * Decimal::from(100)).round_dp(0);
+            let trend = if pct > Decimal::ZERO {
+                format!("+{pct}%")
+            } else {
+                format!("{pct}%")
+            };
+            format!(
+                "**{}** — {} (dasar {}, {trend})",
+                p.item.name,
+                format_bac(p.current_price),
+                format_bac(p.base_price)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let listing_lines = if ov.listings.is_empty() {
+        "Belum ada listing aktif.".to_string()
+    } else {
+        ov.listings
+            .iter()
+            .map(|l| {
+                format!(
+                    "#{} **{} × {}** — target {}/unit, fee {}, habis <t:{}:R>",
+                    l.id,
+                    l.item.name,
+                    l.quantity,
+                    format_bac(l.target_unit_price),
+                    format_bac(l.listing_fee),
+                    l.expires_at.timestamp()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let mut e = branding::styled_embed(branding::COLOR_ECONOMY)
+        .title("Pasar & Makelar (NPC Market)")
+        .field("Harga Pasar NPC Saat Ini", price_lines, false)
+        .field(
+            format!("Listing Makelar Aktif ({}/5)", ov.listings.len()),
+            listing_lines,
+            false,
+        )
+        .field("Wallet", format_bac(ov.wallet_balance), true)
+        .field("Biaya Makelar", "Fee 2% (min 1 Bac) + Komisi 5% saat terjual", true);
+    if let Some(n) = note {
+        e = e.description(n);
+    }
+    e
 }
 
 pub fn city(ov: &CityOverview, note: Option<String>) -> CreateEmbed {

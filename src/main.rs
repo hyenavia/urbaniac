@@ -17,7 +17,7 @@ async fn main() -> Result<()> {
 
     // Satu instance scheduler. Job yang tertunda saat bot mati akan diproses saat start.
     let notify = Arc::new(Notify::new());
-    tokio::spawn(workers::run_scheduler(pool.clone(), notify.clone()));
+    tokio::spawn(workers::run_scheduler(pool.clone(), notify.clone(), cfg.activity_duration_pct));
 
     tracing::info!("database siap, menjalankan bot");
     bot::run(cfg, pool, notify).await

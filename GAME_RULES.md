@@ -38,6 +38,8 @@ ketika cap naik (misalnya saat Balai Kampung menaikkan kota dari Kampung ke Desa
 Setiap pemain memulai dengan kota berstatus **Kampung** dan City Treasury `0.00 Bac`.
 Hanya satu proyek kota yang dapat berjalan pada satu waktu, dan diselesaikan otomatis oleh scheduler persisten.
 
-## Jual ke NPC
-Harga tetap (belum dinamis). Menjual mengurangi item dan menambah Bac dalam satu transaksi dengan
-idempotency key dari ID interaksi Discord.
+## Jual ke NPC & Pasar Makelar
+- **NPC Market (dinamis):** harga beli NPC bergerak dalam rentang `0.70x` sampai `1.50x` dari harga dasar berdasarkan pembaruan berkala (`market_tick` tiap 15 menit, diskalakan `ACTIVITY_DURATION_PCT`) dan volume penjualan pemain (`domain/market`).
+- **Makelar / Broker:** tanpa trading langsung antar pemain. Pemain dapat menitipkan maksimal 5 listing aktif dengan pilihan target harga (+10% / +25% / +40%) dan durasi (1 / 6 / 24 jam).
+  - **Fee listing:** 2% dari total nilai target (minimal `1.00 Bac`), dibayar di muka dan tidak dikembalikan jika batal/kedaluwarsa.
+  - **Komisi penjualan:** 5% dari harga jual kotor saat permintaan NPC menyentuh harga target; hasil bersih masuk Wallet dan tercatat di `ledger_entries`.

@@ -1,7 +1,7 @@
-use crate::domain::economy::npc_buy_price;
+use crate::application::market;
 use crate::domain::resources::{find_item, ItemDef};
 use crate::infrastructure::repositories::wallet_repo::{self, ApplyOutcome, WalletError};
-use crate::infrastructure::repositories::{inventory_repo, player_repo};
+use crate::infrastructure::repositories::{inventory_repo, market_repo, player_repo};
 use rust_decimal::Decimal;
 use sqlx::PgPool;
 
@@ -75,7 +75,9 @@ pub async fn sell_to_npc(
         return Err(SellError::NotEnough { have });
     }
     inventory_repo::remove_item(&mut *tx, player_id, item.id, qty).await?;
-    let total = npc_buy_price(item) * Decimal::from(qty);
+    let unit_price = market::current_npc_price_conn(&mut *tx, item).await?;
+    market_repo::record_sale_volume(&mut *tx, item.id, qty).await?;
+    let total = unit_price * Decimal::from(qty);
     let reason = format!("npc_sale:{}x{}", item.id, qty);
     match wallet_repo::apply(&mut *tx, player_id, total, &reason, idempotency_key).await? {
         ApplyOutcome::Duplicate => Ok(SaleOutcome::Duplicate), // tx di-drop => rollback

@@ -102,18 +102,18 @@ Untuk tiap fase, buat bagian rinci seperti Milestone 1-3 (isi, syarat keluar, uj
 sebelum mulai mengerjakannya.
 
 ### Milestone 4 (Fase 2) — Pasar & Makelar
-**Status:** direncanakan, siap dikerjakan.
+**Status:** kode ditulis, siap diuji di host PostgreSQL & bot Discord.
 
 Isi:
-- [ ] Migrasi `0007_market.sql`: `npc_market_prices` (harga dinamis & multiplier permintaan per item) dan `broker_listings` (item, qty, harga target/minimum, fee, komisi, status, `expires_at`)
-- [ ] Domain `domain/market`: aturan harga dinamis (batas min/maks multiplier dari harga dasar NPC), fee listing (dibayar di muka, tidak dikembalikan jika batal/expired), komisi broker saat terjual, dan opsi durasi listing
-- [ ] NPC Market dinamis: `economy::sell_to_npc` dan menu **Jual** memakai harga pasar terkini; harga diperbarui berkala & merespons volume penjualan/permintaan NPC lewat scheduler
-- [ ] Broker / Makelar (tanpa trading langsung antar pemain): pemain menitipkan item dengan harga target/minimum & durasi; saat permintaan NPC / market tick menyentuh harga target, listing terjual ke NPC, hasil bersih (setelah komisi) masuk Wallet, dan fee/komisi tercatat di `ledger_entries`
-- [ ] Kedaluwarsa & pembatalan listing: listing yang habis durasi diproses scheduler (`broker_expire`), item dikembalikan ke inventory (atau Pending Claim jika penuh); pemain juga bisa membatalkan listing aktif
-- [ ] UI Discord: tombol **Pasar & Makelar** (lihat harga pasar dinamis, buat listing broker dengan pilihan item/harga/durasi, lihat & batalkan listing aktif)
+- [x] Migrasi `0007_market.sql`: `npc_market_prices` (harga dinamis & multiplier permintaan per item) dan `broker_listings` (item, qty, harga target/minimum, fee, komisi, status, `expires_at`)
+- [x] Domain `domain/market`: aturan harga dinamis (batas min/maks multiplier dari harga dasar NPC), fee listing (dibayar di muka, tidak dikembalikan jika batal/expired), komisi broker saat terjual, dan opsi durasi listing
+- [x] NPC Market dinamis: `economy::sell_to_npc` dan menu **Jual** memakai harga pasar terkini; harga diperbarui berkala & merespons volume penjualan/permintaan NPC lewat scheduler
+- [x] Broker / Makelar (tanpa trading langsung antar pemain): pemain menitipkan item dengan harga target/minimum & durasi; saat permintaan NPC / market tick menyentuh harga target, listing terjual ke NPC, hasil bersih (setelah komisi) masuk Wallet, dan fee/komisi tercatat di `ledger_entries`
+- [x] Kedaluwarsa & pembatalan listing: listing yang habis durasi diproses scheduler (`broker_expire`), item dikembalikan ke inventory (atau Pending Claim jika penuh); pemain juga bisa membatalkan listing aktif
+- [x] UI Discord: tombol **Pasar & Makelar** (lihat harga pasar dinamis, buat listing broker dengan pilihan item/harga/durasi, lihat & batalkan listing aktif)
 
 Syarat keluar:
-- [ ] `cargo check`, `cargo test --lib`, `cargo test` (`tests/stage4.rs`) lolos
+- [~] `cargo check`, `cargo test --lib` lolos (`cargo test` `tests/stage4.rs` dijalankan di host PostgreSQL)
 - [ ] Harga NPC Market berubah dinamis saat market tick / transaksi
 - [ ] Buat listing broker: item berkurang dari inventory, fee listing terpotong di `ledger_entries`; ditolak tanpa mutasi jika Bac/item kurang
 - [ ] Listing terjual lewat permintaan NPC saat harga pasar >= harga target/minimum; Bac bersih (harga jual - komisi) masuk Wallet & tercatat di ledger
