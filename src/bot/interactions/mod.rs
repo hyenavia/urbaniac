@@ -1,5 +1,5 @@
 use crate::application::economy::{self, SaleOutcome, SellError, SellQty};
-use crate::application::{activities, city, inventory, market, player};
+use crate::application::{activities, city, crafting, inventory, market, player};
 use crate::bot::{commands, components, embeds, AppState};
 use crate::domain::activities::ActivityKind;
 use crate::domain::city::ProjectId;
@@ -78,6 +78,24 @@ async fn show_market(
         c,
         embeds::market(&ov, note),
         components::market_menu(id as u64, has_listings),
+    )
+    .await
+}
+
+async fn show_craft(
+    ctx: &Context,
+    c: &ComponentInteraction,
+    app: &AppState,
+    id: i64,
+    note: Option<String>,
+) -> anyhow::Result<()> {
+    let ov = crafting::overview(&app.pool, id).await?;
+    let auto_sell = ov.auto_sell;
+    update(
+        ctx,
+        c,
+        embeds::craft(&ov, note),
+        components::craft_menu(id as u64, auto_sell),
     )
     .await
 }
@@ -364,6 +382,85 @@ pub async fn handle_component(
                 Err(e) => e.to_string(),
             };
             show_market(ctx, c, app, id, Some(note)).await
+        }
+        "craft" => show_craft(ctx, c, app, id, None).await,
+        "craftauto" => {
+            let on = crafting::toggle_auto_sell(&app.pool, id).await?;
+            let note = if on {
+                "Auto-Sell hasil craft diaktifkan."
+            } else {
+                "Auto-Sell hasil craft dimatikan."
+            };
+            show_craft(ctx, c, app, id, Some(note.to_string())).await
+        }
+        "craftdo" => {
+            let note = match crafting::start_craft(&app.pool, id, rest, app.activity_duration_pct).await {
+                Ok(run) => {
+                    app.notify.notify_one();
+                    format!(
+                        "Crafting **{} × {}** dimulai — selesai <t:{}:R>.",
+                        run.recipe.name,
+                        run.quantity,
+                        run.ends_at.timestamp()
+                    )
+                }
+                Err(crafting::CraftError::Db(e)) => return Err(e.into()),
+                Err(crafting::CraftError::Wallet(e)) => return Err(e.into()),
+                Err(e) => e.to_string(),
+            };
+            show_craft(ctx, c, app, id, Some(note)).await
+        }
+        "orderpick" => {
+            let ov = crafting::overview(&app.pool, id).await?;
+            if ov.orders.is_empty() {
+                return show_craft(ctx, c, app, id, Some("Tidak ada pesanan aktif.".to_string())).await;
+            }
+            let items: Vec<(i64, String)> = ov
+                .orders
+                .iter()
+                .map(|o| {
+                    (
+                        o.id,
+                        format!("#{} {} × {} ({})", o.id, o.item.name, o.quantity, format_bac(o.reward_bac)),
+                    )
+                })
+                .collect();
+            update(
+                ctx,
+                c,
+                embeds::notice("Penuhi Pesanan NPC", "Pilih pesanan yang ingin diserahkan."),
+                components::order_select(owner, &items),
+            )
+            .await
+        }
+        "orderfulfill" => {
+            let picked = match &c.data.kind {
+                ComponentInteractionDataKind::StringSelect { values } => values.first().cloned(),
+                _ => None,
+            };
+            let Some(order_id) = picked.and_then(|s| s.parse::<i64>().ok()) else { return Ok(()) };
+            let note = match crafting::fulfill_order(&app.pool, id, order_id).await {
+                Ok(s) => {
+                    let lvl = if s.new_rep_level > s.old_rep_level {
+                        format!(" — Reputasi naik ke Lv {}!", s.new_rep_level)
+                    } else {
+                        String::new()
+                    };
+                    format!(
+                        "Pesanan #{} (**{} × {}**) selesai! Hadiah {} + {} Rep XP{}.",
+                        order_id,
+                        s.item.name,
+                        s.quantity,
+                        format_bac(s.reward_bac),
+                        s.rep_xp_gain,
+                        lvl
+                    )
+                }
+                Err(crafting::CraftError::Db(e)) => return Err(e.into()),
+                Err(crafting::CraftError::Wallet(e)) => return Err(e.into()),
+                Err(e) => e.to_string(),
+            };
+            show_craft(ctx, c, app, id, Some(note)).await
         }
         "mktcancel" => {
             let ov = market::overview(&app.pool, id).await?;

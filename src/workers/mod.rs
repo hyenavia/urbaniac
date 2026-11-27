@@ -1,6 +1,6 @@
 //! Scheduler tunggal + worker ber-batas. Tidak ada timer per aktivitas dan tidak ada polling rapat:
 //! scheduler tidur sampai job berikutnya jatuh tempo (atau dibangunkan lewat Notify).
-use crate::application::{activities, city, market};
+use crate::application::{activities, city, crafting, market};
 use crate::infrastructure::scheduler::{self, DueJob};
 use chrono::Utc;
 use sqlx::PgPool;
@@ -22,6 +22,7 @@ async fn run_job(pool: &PgPool, job: &DueJob, duration_pct: i64) -> anyhow::Resu
     match job.kind.as_str() {
         activities::JOB_ACTIVITY_COMPLETE => activities::complete_run(&mut *tx, job.ref_id).await?,
         city::JOB_CITY_PROJECT_COMPLETE => city::complete_project(&mut *tx, job.ref_id).await?,
+        crafting::JOB_CRAFT_COMPLETE => crafting::complete_craft(&mut *tx, job.ref_id).await?,
         market::JOB_BROKER_EXPIRE => market::expire_listing(&mut *tx, job.ref_id).await?,
         market::JOB_MARKET_TICK => market::handle_market_tick_job(&mut *tx, duration_pct).await?,
         other => anyhow::bail!("jenis job tidak dikenal: {other}"),

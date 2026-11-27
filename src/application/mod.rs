@@ -1,5 +1,6 @@
 pub mod activities;
 pub mod city;
+pub mod crafting;
 pub mod economy;
 pub mod inventory;
 pub mod market;

@@ -1,10 +1,12 @@
 use crate::application::activities::{ActivityOverview, ClaimSummary, RunStatus};
 use crate::application::city::CityOverview;
+use crate::application::crafting::CraftOverview;
 use crate::application::inventory::{InventoryLine, InventoryView};
 use crate::application::market::MarketOverview;
 use crate::application::player::ProfileView;
 use crate::bot::branding;
 use crate::domain::city::{def as project_def, project_cost_bac, ProjectId};
+use crate::domain::crafting::RECIPES;
 use crate::domain::economy::format_bac;
 use crate::domain::player::xp_to_next;
 use crate::domain::resources::{find_item, ItemDef};
@@ -308,6 +310,81 @@ pub fn city(ov: &CityOverview, note: Option<String>) -> CreateEmbed {
         .field("Fasilitas", facilities, false)
         .field("Proyek Berjalan", running, false)
         .field("Daftar Proyek", projects, false);
+    if let Some(n) = note {
+        e = e.description(n);
+    }
+    e
+}
+
+pub fn craft(ov: &CraftOverview, note: Option<String>) -> CreateEmbed {
+    let running = if ov.running.is_empty() {
+        "Tidak ada crafting berjalan.".to_string()
+    } else {
+        ov.running
+            .iter()
+            .map(|r| {
+                let tag = if r.auto_sell { " [Auto-Sell]" } else { "" };
+                format!(
+                    "**{} × {}**{} — selesai <t:{}:R>",
+                    r.recipe.name,
+                    r.quantity,
+                    tag,
+                    r.ends_at.timestamp()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let recipes = RECIPES
+        .iter()
+        .map(|r| {
+            let ins = r
+                .inputs
+                .iter()
+                .map(|(id, q)| {
+                    let name = find_item(id).map(|i| i.name).unwrap_or(id);
+                    format!("{name} x{q}")
+                })
+                .collect::<Vec<_>>()
+                .join(" + ");
+            format!("**{}** [{}] — {} ({}d)", r.name, r.tier.name(), ins, r.duration_secs)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let orders = if ov.orders.is_empty() {
+        "Belum ada pesanan aktif.".to_string()
+    } else {
+        ov.orders
+            .iter()
+            .map(|o| {
+                format!(
+                    "#{} **{} × {}** — hadiah {} (+{} Rep XP)",
+                    o.id,
+                    o.item.name,
+                    o.quantity,
+                    format_bac(o.reward_bac),
+                    o.rep_xp
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let mut e = branding::styled_embed(branding::COLOR_ECONOMY)
+        .title("Crafting & Pesanan NPC")
+        .field(
+            "Reputasi Toko",
+            format!(
+                "Lv {} ({}/{} XP) • Bonus Order +{}% • Selesai: {}",
+                ov.rep_level, ov.rep_xp, ov.rep_xp_needed, ov.rep_bonus_pct, ov.completed_orders
+            ),
+            false,
+        )
+        .field("Crafting Berjalan (maks 2)", running, false)
+        .field("Resep", recipes, false)
+        .field("Pesanan NPC Aktif", orders, false);
     if let Some(n) = note {
         e = e.description(n);
     }

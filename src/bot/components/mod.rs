@@ -21,6 +21,7 @@ pub fn main_menu(owner: u64) -> Vec<CreateActionRow> {
         ]),
         CreateActionRow::Buttons(vec![
             btn("market", owner, "", "Pasar & Makelar", ButtonStyle::Success),
+            btn("craft", owner, "", "Crafting & Pesanan", ButtonStyle::Primary),
             btn("sell", owner, "", "Jual NPC", ButtonStyle::Success),
             btn("claim", owner, "", "Klaim Pending", ButtonStyle::Secondary),
         ]),
@@ -193,4 +194,48 @@ mod tests {
         assert_eq!(parse_custom_id("ub:profile"), None);
         assert_eq!(parse_custom_id("ub:profile:abc"), None);
     }
+}
+
+pub fn craft_menu(owner: u64, auto_sell: bool) -> Vec<CreateActionRow> {
+    let auto_label = if auto_sell {
+        "Auto-Sell Craft: ON"
+    } else {
+        "Auto-Sell Craft: OFF"
+    };
+    vec![
+        CreateActionRow::Buttons(vec![
+            btn("craftdo", owner, "flour", "Craft Tepung", ButtonStyle::Success),
+            btn("craftdo", owner, "plank", "Craft Papan", ButtonStyle::Success),
+            btn("craftdo", owner, "herb_extract", "Craft Ekstrak", ButtonStyle::Success),
+        ]),
+        CreateActionRow::Buttons(vec![
+            btn("craftdo", owner, "bread", "Craft Roti", ButtonStyle::Primary),
+            btn("craftdo", owner, "wooden_crate", "Craft Peti", ButtonStyle::Primary),
+            btn("craftdo", owner, "healing_tonic", "Craft Tonik", ButtonStyle::Primary),
+        ]),
+        CreateActionRow::Buttons(vec![
+            btn("orderpick", owner, "", "Penuhi Pesanan", ButtonStyle::Success),
+            btn("craftauto", owner, "", auto_label, ButtonStyle::Secondary),
+            btn("craft", owner, "", "Refresh", ButtonStyle::Secondary),
+            btn("profile", owner, "", "Menu Utama", ButtonStyle::Secondary),
+        ]),
+    ]
+}
+
+pub fn order_select(owner: u64, orders: &[(i64, String)]) -> Vec<CreateActionRow> {
+    let options: Vec<CreateSelectMenuOption> = orders
+        .iter()
+        .take(25)
+        .map(|(id, label)| CreateSelectMenuOption::new(label.clone(), id.to_string()))
+        .collect();
+    vec![
+        CreateActionRow::SelectMenu(
+            CreateSelectMenu::new(
+                format!("{PREFIX}:orderfulfill:{owner}"),
+                CreateSelectMenuKind::String { options },
+            )
+            .placeholder("Pilih pesanan NPC untuk dipenuhi"),
+        ),
+        CreateActionRow::Buttons(vec![btn("craft", owner, "", "Kembali", ButtonStyle::Secondary)]),
+    ]
 }

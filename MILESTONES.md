@@ -120,3 +120,30 @@ Syarat keluar:
 - [ ] Listing kedaluwarsa diproses scheduler setelah durasi habis (atau restart bot): item kembali ke inventory / Pending Claim
 
 Uji manual: buka Pasar & Makelar -> cek harga dinamis -> jual langsung ke NPC -> buat listing broker -> tunggu tick/kedaluwarsa -> cek saldo & ledger.
+
+### Milestone 5 (Fase 3) — Crafting & Pesanan
+**Status:** dalam pengerjaan.
+
+Isi:
+- [ ] Migrasi `0008_crafting_orders.sql`: `crafting_jobs` (antrean crafting lewat scheduler), `npc_orders` (pesanan NPC aktif & selesai), `shop_reputation` (reputasi toko & XP)
+- [ ] Domain `domain/crafting`: katalog item Processed & Finished, recipe bertingkat (`Raw -> Processed -> Finished`), durasi crafting
+- [ ] Crafting service + scheduler job `craft_complete`: bahan dipotong atomik, hasil masuk inventory / Pending Claim saat selesai
+- [ ] NPC Orders & Reputasi Toko: generate pesanan NPC, penuhi pesanan (potong item, beri Bac + bonus reputasi), struktur `auto_craft`/`auto_sell` siap pakai
+- [ ] UI Discord & `tests/stage5.rs`
+
+### Milestone 6 (Fase 4) — Kru & Automasi
+**Status:** direncanakan.
+
+Isi:
+- [ ] Migrasi `0009_crew.sql`: `player_crews` (kru rekrutan, rarity, spesialisasi, level, `assigned_activity`, `auto_enabled`)
+- [ ] Domain `domain/crew`: rekrut kru (biaya Bac), rarity (Common..Epic), spesialisasi (Farming/Gathering/Fishing/Mining), upgrade level, bonus Efficiency (durasi), Yield (hasil), Luck (rarity)
+- [ ] Integrasi ke `activities`: kru memberi bonus Efficiency/Yield/Luck pada aktivitas dan dapat mengotomatisasi ulang aktivitas yang selesai tanpa menambah Activity Slot
+- [ ] UI Discord & `tests/stage6.rs`
+
+### Milestone 7 (Fase 5) — Activity & Resource Expansion
+**Status:** direncanakan.
+
+Isi:
+- [ ] Migrasi `0010_expansion.sql`: seed harga `npc_market_prices` untuk item baru Fishing & Mining
+- [ ] Aktivitas baru: **Fishing** (terbuka di stage **Desa**) dan **Mining** (terbuka di stage **Kota Kecil**) + item rarity lebih tinggi (Rare/Epic)
+- [ ] UI Discord (tombol Fishing/Mining di menu Aktivitas) & `tests/stage7.rs`

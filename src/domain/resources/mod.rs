@@ -36,11 +36,20 @@ pub struct ItemDef {
 pub const BASE_SLOT_CAPACITY: i64 = 12;
 
 pub const ITEMS: &[ItemDef] = &[
+    // Raw
     ItemDef { id: "wheat", name: "Gandum", rarity: Rarity::Common, stack_limit: 100, npc_price_cents: 300 },
     ItemDef { id: "potato", name: "Kentang", rarity: Rarity::Common, stack_limit: 100, npc_price_cents: 400 },
     ItemDef { id: "wood", name: "Kayu", rarity: Rarity::Common, stack_limit: 100, npc_price_cents: 300 },
     ItemDef { id: "berries", name: "Buah Hutan", rarity: Rarity::Common, stack_limit: 100, npc_price_cents: 350 },
     ItemDef { id: "wild_herb", name: "Herba Liar", rarity: Rarity::Uncommon, stack_limit: 50, npc_price_cents: 1200 },
+    // Processed
+    ItemDef { id: "flour", name: "Tepung Gandum", rarity: Rarity::Common, stack_limit: 100, npc_price_cents: 800 },
+    ItemDef { id: "plank", name: "Papan Kayu", rarity: Rarity::Common, stack_limit: 100, npc_price_cents: 800 },
+    ItemDef { id: "herb_extract", name: "Ekstrak Herba", rarity: Rarity::Uncommon, stack_limit: 50, npc_price_cents: 3200 },
+    // Finished
+    ItemDef { id: "bread", name: "Roti Kampung", rarity: Rarity::Common, stack_limit: 50, npc_price_cents: 2000 },
+    ItemDef { id: "wooden_crate", name: "Peti Kayu", rarity: Rarity::Uncommon, stack_limit: 50, npc_price_cents: 2200 },
+    ItemDef { id: "healing_tonic", name: "Tonik Herba", rarity: Rarity::Rare, stack_limit: 30, npc_price_cents: 5500 },
 ];
 
 pub fn find_item(id: &str) -> Option<&'static ItemDef> {
