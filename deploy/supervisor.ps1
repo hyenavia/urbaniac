@@ -9,6 +9,8 @@ $Repository = "urbaniac"
 $Branch = "main"
 $CheckInterval = 300
 $RestartDelay = 10
+$ActivityRecoveryBaseCooldownSec = 900
+$ActivityRecoveryMaxCooldownSec = 3600
 
 $RepoPath = "D:\Projects\urbaniac"
 $EnvFile = Join-Path $RepoPath ".env"
@@ -36,6 +38,8 @@ $SupervisorLog = Join-Path $LogDirectory "supervisor.log"
 $GitExe = (Get-Command git -ErrorAction Stop).Source
 $script:BotProcess = $null
 $script:ActivityDegradedAlerted = $false
+$script:ActivityRecoveryAttempts = 0
+$script:NextActivityRecoveryAt = [datetime]::MinValue
 $script:ApiHeaders = @{
     "User-Agent" = "Urbaniac-Deployment-Supervisor"
     "Accept" = "application/vnd.github+json"
@@ -55,6 +59,28 @@ function Write-Log([string]$Message) {
     catch {
         # Never crash the supervisor loop if log file write encounters transient contention.
     }
+}
+
+function Get-CurrentUtc {
+    return [datetime]::UtcNow
+}
+
+function Reset-ActivityRecoveryState {
+    $script:ActivityDegradedAlerted = $false
+    $script:ActivityRecoveryAttempts = 0
+    $script:NextActivityRecoveryAt = [datetime]::MinValue
+}
+
+function Schedule-NextActivityRecovery {
+    $script:ActivityRecoveryAttempts++
+    $exp = [Math]::Min($script:ActivityRecoveryAttempts - 1, 4)
+    $cooldownSec = [Math]::Min(
+        $ActivityRecoveryMaxCooldownSec,
+        [int]($ActivityRecoveryBaseCooldownSec * [Math]::Pow(2, $exp))
+    )
+    $nextAt = (Get-CurrentUtc).AddSeconds($cooldownSec)
+    $script:NextActivityRecoveryAt = $nextAt
+    Write-Log "Scheduled next controlled Activity recovery attempt #$($script:ActivityRecoveryAttempts + 1) after $cooldownSec seconds (at $($nextAt.ToString('yyyy-MM-dd HH:mm:ss')) UTC)."
 }
 
 function Send-DiscordNotification([string]$Message) {
@@ -94,15 +120,73 @@ function Invoke-WithRetry([scriptblock]$Action, [int]$Attempts = 3, [int]$DelayM
     }
 }
 
-function Download-FileAtomic([string]$Uri, [string]$DestPath, [int]$TimeoutSec) {
-    $tmpPath = "$DestPath.tmp"
-    Remove-Item $tmpPath -Force -ErrorAction SilentlyContinue
+function Write-StateFile([string]$Path, [string]$Value) {
+    $tmpPath = "$Path.tmp"
+    Remove-Item -Path $tmpPath -Force -ErrorAction SilentlyContinue | Out-Null
     try {
-        Invoke-WebRequest -Uri $Uri -OutFile $tmpPath -UseBasicParsing -TimeoutSec $TimeoutSec
-        Move-Item -Path $tmpPath -Destination $DestPath -Force
+        Invoke-WithRetry {
+            Set-Content -Path $tmpPath -Value $Value
+            Move-Item -Path $tmpPath -Destination $Path -Force
+        } | Out-Null
     }
     catch {
-        Remove-Item $tmpPath -Force -ErrorAction SilentlyContinue
+        Remove-Item -Path $tmpPath -Force -ErrorAction SilentlyContinue | Out-Null
+        throw
+    }
+}
+
+function Get-DeploymentStateSnapshot {
+    $paths = @(
+        $DeployedCommitFile,
+        $DeployedExeFile,
+        $DeployedFrontendCommitFile,
+        $DeployedBackendHashFile
+    )
+    $entries = @()
+    foreach ($p in $paths) {
+        $exists = [bool](Test-Path -Path $p -PathType Leaf)
+        $content = ""
+        if ($exists) {
+            $content = Read-TrimmedFile $p
+        }
+        $entries += [PSCustomObject]@{
+            Path    = $p
+            Exists  = $exists
+            Content = $content
+        }
+    }
+    return $entries
+}
+
+function Restore-DeploymentStateSnapshot($Snapshot) {
+    if (-not $Snapshot) { return }
+    foreach ($entry in $Snapshot) {
+        try {
+            if ($entry.Exists) {
+                $current = Read-TrimmedFile $entry.Path
+                if ($current -ne $entry.Content) {
+                    Write-StateFile $entry.Path $entry.Content
+                }
+            }
+            elseif (Test-Path -Path $entry.Path) {
+                Remove-Item -Path $entry.Path -Force -ErrorAction SilentlyContinue | Out-Null
+            }
+        }
+        catch {
+            Write-Log "Warning: failed to restore state file $($entry.Path): $($_.Exception.Message)"
+        }
+    }
+}
+
+function Download-FileAtomic([string]$Uri, [string]$DestPath, [int]$TimeoutSec) {
+    $tmpPath = "$DestPath.tmp"
+    Remove-Item $tmpPath -Force -ErrorAction SilentlyContinue | Out-Null
+    try {
+        Invoke-WebRequest -Uri $Uri -OutFile $tmpPath -UseBasicParsing -TimeoutSec $TimeoutSec | Out-Null
+        Move-Item -Path $tmpPath -Destination $DestPath -Force | Out-Null
+    }
+    catch {
+        Remove-Item $tmpPath -Force -ErrorAction SilentlyContinue | Out-Null
         throw
     }
 }
@@ -320,7 +404,7 @@ function Get-VerifiedCandidate([string]$Commit) {
         Write-Log "Downloading prebuilt executable for commit $short."
         Download-FileAtomic $exeUrl $downloadExe 300
         if (-not (Test-Sha256 $downloadExe $expectedExeHash)) {
-            Remove-Item $downloadExe -Force -ErrorAction SilentlyContinue
+            Remove-Item $downloadExe -Force -ErrorAction SilentlyContinue | Out-Null
             throw [System.IO.InvalidDataException]::new("SHA-256 verification failed for urbaniac.exe ($short).")
         }
     }
@@ -329,12 +413,12 @@ function Get-VerifiedCandidate([string]$Commit) {
         Write-Log "Downloading prebuilt frontend-dist.zip for commit $short."
         Download-FileAtomic $feUrl $downloadFeZip 180
         if (-not (Test-Sha256 $downloadFeZip $expectedFeHash)) {
-            Remove-Item $downloadFeZip -Force -ErrorAction SilentlyContinue
+            Remove-Item $downloadFeZip -Force -ErrorAction SilentlyContinue | Out-Null
             throw [System.IO.InvalidDataException]::new("SHA-256 verification failed for frontend-dist.zip ($short).")
         }
     }
 
-    Copy-Item $downloadExe $candidateExe -Force
+    Copy-Item $downloadExe $candidateExe -Force | Out-Null
     Write-Log "Assets downloaded, manifest cross-checked, and SHA-256 verified for commit $short."
 
     return [PSCustomObject]@{
@@ -347,7 +431,15 @@ function Get-VerifiedCandidate([string]$Commit) {
     }
 }
 
-function Publish-StagedFrontend([string]$ZipPath, [string]$Commit) {
+function Cleanup-FrontendStaging([string]$StagePath) {
+    if ($StagePath -and (Test-Path $StagePath)) {
+        Remove-Item -Path $StagePath -Recurse -Force -ErrorAction SilentlyContinue | Out-Null
+    }
+    Get-ChildItem -Path $FrontendStagingRoot -Directory -ErrorAction SilentlyContinue |
+        ForEach-Object { Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue | Out-Null }
+}
+
+function Stage-FrontendArchive([string]$ZipPath, [string]$Commit) {
     $short = $Commit.Substring(0, 7)
     $stagePath = Join-Path $FrontendStagingRoot ("stage-" + $short + "-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
     New-Item -ItemType Directory -Force -Path $stagePath | Out-Null
@@ -365,43 +457,54 @@ function Publish-StagedFrontend([string]$ZipPath, [string]$Commit) {
             throw [System.IO.InvalidDataException]::new("Staged frontend is missing index.html ($short).")
         }
 
-        if (Test-Path $FrontendPreviousDir) {
-            Invoke-WithRetry { Remove-Item -Path $FrontendPreviousDir -Recurse -Force | Out-Null } | Out-Null
-        }
+        return $stagePath
+    }
+    catch {
+        Cleanup-FrontendStaging -StagePath $stagePath
+        throw
+    }
+}
 
-        $hadCurrent = [bool](Test-Path $FrontendCurrentDir)
-        if ($hadCurrent) {
-            Invoke-WithRetry { Move-Item -Path $FrontendCurrentDir -Destination $FrontendPreviousDir -Force | Out-Null } | Out-Null
-        }
+function Switch-StagedFrontend([string]$StagePath, [string]$Commit) {
+    $short = $Commit.Substring(0, 7)
+    if (Test-Path $FrontendPreviousDir) {
+        Invoke-WithRetry { Remove-Item -Path $FrontendPreviousDir -Recurse -Force | Out-Null } | Out-Null
+    }
 
-        try {
-            Invoke-WithRetry { Move-Item -Path $stagePath -Destination $FrontendCurrentDir -Force | Out-Null } | Out-Null
-        }
-        catch {
-            if ($hadCurrent -and (Test-Path $FrontendPreviousDir) -and -not (Test-Path $FrontendCurrentDir)) {
-                try {
-                    Invoke-WithRetry { Move-Item -Path $FrontendPreviousDir -Destination $FrontendCurrentDir -Force | Out-Null } | Out-Null
-                }
-                catch {
-                    Write-Log "Failed to restore previous frontend after swap error: $($_.Exception.Message)"
-                }
+    $hadCurrent = [bool](Test-Path $FrontendCurrentDir)
+    if ($hadCurrent) {
+        Invoke-WithRetry { Move-Item -Path $FrontendCurrentDir -Destination $FrontendPreviousDir -Force | Out-Null } | Out-Null
+    }
+
+    try {
+        Invoke-WithRetry { Move-Item -Path $StagePath -Destination $FrontendCurrentDir -Force | Out-Null } | Out-Null
+    }
+    catch {
+        if ($hadCurrent -and (Test-Path $FrontendPreviousDir) -and -not (Test-Path $FrontendCurrentDir)) {
+            try {
+                Invoke-WithRetry { Move-Item -Path $FrontendPreviousDir -Destination $FrontendCurrentDir -Force | Out-Null } | Out-Null
             }
-            elseif ((-not $hadCurrent) -and (Test-Path $FrontendCurrentDir)) {
-                Remove-Item -Path $FrontendCurrentDir -Recurse -Force -ErrorAction SilentlyContinue | Out-Null
+            catch {
+                Write-Log "Failed to restore previous frontend after swap error: $($_.Exception.Message)"
             }
-            throw
         }
+        elseif ((-not $hadCurrent) -and (Test-Path $FrontendCurrentDir)) {
+            Remove-Item -Path $FrontendCurrentDir -Recurse -Force -ErrorAction SilentlyContinue | Out-Null
+        }
+        throw
+    }
 
-        Write-Log "Frontend atomically deployed to $FrontendCurrentDir for commit $short (hadPrevious: $hadCurrent)."
-        return [bool]$hadCurrent
+    Write-Log "Frontend atomically deployed to $FrontendCurrentDir for commit $short (hadPrevious: $hadCurrent)."
+    return [bool]$hadCurrent
+}
+
+function Publish-StagedFrontend([string]$ZipPath, [string]$Commit) {
+    $stagePath = Stage-FrontendArchive -ZipPath $ZipPath -Commit $Commit
+    try {
+        return [bool](Switch-StagedFrontend -StagePath $stagePath -Commit $Commit)
     }
     finally {
-        if (Test-Path $stagePath) {
-            Remove-Item -Path $stagePath -Recurse -Force -ErrorAction SilentlyContinue | Out-Null
-        }
-        # Clean up older leftover staging folders, keeping staging root clean.
-        Get-ChildItem -Path $FrontendStagingRoot -Directory -ErrorAction SilentlyContinue |
-            ForEach-Object { Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue | Out-Null }
+        Cleanup-FrontendStaging -StagePath $stagePath
     }
 }
 
@@ -450,19 +553,55 @@ function Get-BotProcesses {
 }
 
 function Stop-AllBotProcesses {
-    foreach ($p in (Get-BotProcesses)) {
+    $initial = @(Get-BotProcesses)
+    $hadWork = ($initial.Count -gt 0) -or ($null -ne $script:BotProcess)
+
+    foreach ($p in $initial) {
         Write-Log "Stopping bot process PID $($p.ProcessId)."
         Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
     }
+    if ($script:BotProcess) {
+        try {
+            $script:BotProcess.Refresh()
+            if (-not $script:BotProcess.HasExited) {
+                Write-Log "Stopping tracked bot process PID $($script:BotProcess.Id)."
+                Stop-Process -Id $script:BotProcess.Id -Force -ErrorAction SilentlyContinue
+            }
+        }
+        catch {
+            # Ignore already exited process handle errors.
+        }
+    }
+
+    $deadline = (Get-CurrentUtc).AddSeconds(10)
+    while ((Get-CurrentUtc) -lt $deadline) {
+        $remaining = @(Get-BotProcesses)
+        if ($remaining.Count -eq 0) {
+            break
+        }
+        Start-Sleep -Milliseconds 500
+        foreach ($p in $remaining) {
+            Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+    }
+
+    $stillAlive = @(Get-BotProcesses)
+    if ($stillAlive.Count -gt 0) {
+        $pids = ($stillAlive | ForEach-Object { $_.ProcessId }) -join ", "
+        throw "Failed to stop existing bot process(es): PID $pids"
+    }
+
     $script:BotProcess = $null
-    Remove-Item $BotPidFile -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
+    Remove-Item $BotPidFile -Force -ErrorAction SilentlyContinue | Out-Null
+    if ($hadWork) {
+        Start-Sleep -Seconds 1
+    }
 }
 
 function Start-Bot([string]$ExePath, [switch]$AllowDegradedActivity) {
     if (-not (Test-Path $ExePath)) { throw "Executable not found: $ExePath" }
 
-    Remove-Item $StdoutLog, $StderrLog -Force -ErrorAction SilentlyContinue
+    Remove-Item $StdoutLog, $StderrLog -Force -ErrorAction SilentlyContinue | Out-Null
     Write-Log "Starting bot from $ExePath."
 
     $script:BotProcess = Start-Process -FilePath $ExePath `
@@ -499,8 +638,8 @@ function Start-Bot([string]$ExePath, [switch]$AllowDegradedActivity) {
 
     $activityCfg = Get-ActivityHealthConfig
     if (-not $activityCfg.Enabled) {
-        $script:ActivityDegradedAlerted = $false
-        return
+        Reset-ActivityRecoveryState
+        return "Healthy"
     }
 
     $bindErrorLogged = (Test-Path $StdoutLog) -and (
@@ -513,18 +652,21 @@ function Start-Bot([string]$ExePath, [switch]$AllowDegradedActivity) {
     }
 
     if ($activityHealthy) {
-        $script:ActivityDegradedAlerted = $false
+        Reset-ActivityRecoveryState
         Write-Log "Activity Web API health check passed at $($activityCfg.HealthUrl)."
-        return
+        return "Healthy"
     }
 
     if ($AllowDegradedActivity) {
-        Write-Log "WARNING: Bot connected to Discord, but Activity Web API failed at $($activityCfg.HealthUrl). Keeping fallback bot online in degraded mode."
+        Write-Log "WARNING: Bot connected to Discord, but Activity Web API failed at $($activityCfg.HealthUrl). Keeping bot online in degraded mode."
         if (-not $script:ActivityDegradedAlerted) {
-            Send-DiscordNotification "$IconWarn **URBANIAC ACTIVITY DEGRADED**`nFallback bot is online on Discord, but Activity Web API failed `/api/health` at `$($activityCfg.BindAddr)`."
+            Send-DiscordNotification "$IconWarn **URBANIAC ACTIVITY DEGRADED**`nBot is online on Discord, but Activity Web API failed `/api/health` at `$($activityCfg.BindAddr)`."
             $script:ActivityDegradedAlerted = $true
         }
-        return
+        if ((Get-CurrentUtc) -ge $script:NextActivityRecoveryAt) {
+            Schedule-NextActivityRecovery
+        }
+        return "Degraded"
     }
 
     Stop-Process -Id $script:BotProcess.Id -Force -ErrorAction SilentlyContinue
@@ -568,23 +710,102 @@ function Test-BotAndActivityHealthy {
 
     $activityCfg = Get-ActivityHealthConfig
     if (-not $activityCfg.Enabled) {
-        $script:ActivityDegradedAlerted = $false
+        Reset-ActivityRecoveryState
         return $true
     }
 
     if (Test-ActivityHealth -HealthUrl $activityCfg.HealthUrl -Attempts 3 -DelayMs 1000) {
-        $script:ActivityDegradedAlerted = $false
+        if ($script:ActivityDegradedAlerted) {
+            Write-Log "Activity Web API recovered at $($activityCfg.HealthUrl)."
+        }
+        Reset-ActivityRecoveryState
         return $true
     }
 
-    Write-Log "Bot is running, but Activity Web API failed health check at $($activityCfg.HealthUrl)."
-    if (-not $script:ActivityDegradedAlerted) {
-        Write-Log "Stopping running bot once so recovery can restore Activity Web API."
-        Stop-AllBotProcesses
-        return $false
+    Write-Log "Bot process is alive, but Activity Web API failed health check at $($activityCfg.HealthUrl)."
+    return $false
+}
+
+function Invoke-FallbackBotRecovery {
+    $exe = Read-TrimmedFile $DeployedExeFile
+    if (-not $exe -or -not (Test-Path $exe)) {
+        $exe = Join-Path $DeployRoot "release\urbaniac.exe"
+    }
+    if (-not $exe -or -not (Test-Path $exe)) {
+        return "Unavailable"
     }
 
-    return $true
+    try {
+        return [string](Start-Bot $exe)
+    }
+    catch {
+        Write-Log "Strict recovery failed ($($_.Exception.Message)). Retrying recovery allowing degraded Activity state."
+        try {
+            Stop-AllBotProcesses
+        }
+        catch {
+            Write-Log "Warning during pre-degraded Stop-AllBotProcesses: $($_.Exception.Message)"
+        }
+        return [string](Start-Bot $exe -AllowDegradedActivity)
+    }
+}
+
+function Invoke-ControlledHealthRecovery([switch]$IsStartup) {
+    $botAlive = Test-BotAlive
+    $wasDegraded = $script:ActivityDegradedAlerted
+    $now = Get-CurrentUtc
+
+    if ($botAlive) {
+        if ($now -lt $script:NextActivityRecoveryAt) {
+            Write-Log "Discord bot remains online in degraded mode; next controlled Activity recovery attempt at $($script:NextActivityRecoveryAt.ToString('yyyy-MM-dd HH:mm:ss')) UTC."
+            return "Cooldown"
+        }
+
+        $attemptNum = $script:ActivityRecoveryAttempts + 1
+        Write-Log "Activity Web API unhealthy; attempting controlled recovery restart #$attemptNum."
+        try {
+            Stop-AllBotProcesses
+        }
+        catch {
+            Write-Log "Controlled recovery could not stop running bot cleanly: $($_.Exception.Message)"
+            $activityCfg = Get-ActivityHealthConfig
+            if (-not $script:ActivityDegradedAlerted) {
+                Send-DiscordNotification "$IconWarn **URBANIAC ACTIVITY DEGRADED**`nBot is online on Discord, but Activity Web API failed `/api/health` at `$($activityCfg.BindAddr)`."
+                $script:ActivityDegradedAlerted = $true
+            }
+            if ((Get-CurrentUtc) -ge $script:NextActivityRecoveryAt) {
+                Schedule-NextActivityRecovery
+            }
+            return "Degraded"
+        }
+    }
+    else {
+        Write-Log "Bot process is not running. Attempting recovery."
+    }
+
+    $result = Invoke-FallbackBotRecovery
+    if ($result -eq "Healthy") {
+        Reset-ActivityRecoveryState
+        if (-not $IsStartup) {
+            if ($wasDegraded -or $botAlive) {
+                Send-DiscordNotification "$IconGreen **URBANIAC ONLINE**`nActivity Web API and Discord bot recovered successfully."
+            }
+            else {
+                Send-DiscordNotification "$IconGreen **URBANIAC ONLINE**`nBot recovered successfully."
+            }
+        }
+        return "Healthy"
+    }
+
+    if ($result -eq "Degraded") {
+        if ((Get-CurrentUtc) -ge $script:NextActivityRecoveryAt) {
+            Schedule-NextActivityRecovery
+        }
+        return "Degraded"
+    }
+
+    Write-Log "No deployed executable available for recovery. Waiting for release."
+    return "Unavailable"
 }
 
 function Deploy-Commit([string]$Commit) {
@@ -650,8 +871,21 @@ function Deploy-Commit([string]$Commit) {
 
     if ($backendUnchanged) {
         Write-Log "Backend unchanged for commit $short. Updating frontend only without stopping bot."
+        $stateSnapshot = Get-DeploymentStateSnapshot
+        $hadFrontendBefore = $false
+        $frontendSwitched = $false
         try {
-            $null = Publish-StagedFrontend $candidate.FrontendZip $Commit
+            $hadFrontendBefore = [bool](Publish-StagedFrontend $candidate.FrontendZip $Commit)
+            $frontendSwitched = $true
+            Write-StateFile $DeployedCommitFile $Commit
+            Write-StateFile $DeployedFrontendCommitFile $Commit
+            if ($candidate.BackendTreeHash) {
+                Write-StateFile $DeployedBackendHashFile $candidate.BackendTreeHash
+            }
+            Remove-Item $FailedCommitFile -Force -ErrorAction SilentlyContinue | Out-Null
+            Write-Log "Frontend-only deployment successful: $Commit"
+            Send-DiscordNotification "$IconArt **URBANIAC FRONTEND UPDATE**`nActivity frontend updated atomically without restarting the bot.`nCommit: $short"
+            return $true
         }
         catch [System.IO.InvalidDataException] {
             Write-Log "Frontend package validation failed for commit $short : $($_.Exception.Message)"
@@ -659,21 +893,22 @@ function Deploy-Commit([string]$Commit) {
             Send-DiscordNotification "$IconWarn **URBANIAC DEPLOY SKIPPED**`nFrontend artifact validation failed for commit $short.`n$($_.Exception.Message)"
             return $false
         }
-        Set-Content -Path $DeployedCommitFile -Value $Commit
-        Set-Content -Path $DeployedFrontendCommitFile -Value $Commit
-        if ($candidate.BackendTreeHash) {
-            Set-Content -Path $DeployedBackendHashFile -Value $candidate.BackendTreeHash
+        catch {
+            Write-Log "Frontend-only update failed for commit $short : $($_.Exception.Message)"
+            $feRolledBack = $true
+            if ($frontendSwitched) {
+                $feRolledBack = Restore-FrontendAfterFailure -HadCurrentBefore $hadFrontendBefore
+            }
+            Restore-DeploymentStateSnapshot $stateSnapshot
+            Send-DiscordNotification "$IconWarn **URBANIAC FRONTEND ROLLBACK**`nFrontend update failed after swap (rolled back: $feRolledBack). Bot stays online.`nCommit: $short"
+            return $false
         }
-        Remove-Item $FailedCommitFile -Force -ErrorAction SilentlyContinue | Out-Null
-        Write-Log "Frontend-only deployment successful: $Commit"
-        Send-DiscordNotification "$IconArt **URBANIAC FRONTEND UPDATE**`nActivity frontend updated atomically without restarting the bot.`nCommit: $short"
-        return $true
     }
 
-    # Deploy staged frontend before switching the backend executable so both share the exact same commit.
-    $hadFrontendBefore = $false
+    # Stage and verify the frontend archive first, while keeping both the running bot and current frontend untouched.
+    $stagePath = $null
     try {
-        $hadFrontendBefore = [bool](Publish-StagedFrontend $candidate.FrontendZip $Commit)
+        $stagePath = Stage-FrontendArchive -ZipPath $candidate.FrontendZip -Commit $Commit
     }
     catch [System.IO.InvalidDataException] {
         Write-Log "Frontend package validation failed for commit $short : $($_.Exception.Message)"
@@ -682,63 +917,86 @@ function Deploy-Commit([string]$Commit) {
         return $false
     }
 
-    # Keep the currently running bot online throughout download and verification.
-    Stop-AllBotProcesses
     try {
-        Start-Bot $candidate.ExePath
-        Set-Content -Path $DeployedCommitFile -Value $Commit
-        Set-Content -Path $DeployedExeFile -Value $candidate.ExePath
-        Set-Content -Path $DeployedFrontendCommitFile -Value $Commit
-        if ($candidate.BackendTreeHash) {
-            Set-Content -Path $DeployedBackendHashFile -Value $candidate.BackendTreeHash
+        # Stop the old backend before activating the new frontend so a stop failure never pairs new frontend with old backend.
+        try {
+            Stop-AllBotProcesses
         }
-        Remove-Item $FailedCommitFile -Force -ErrorAction SilentlyContinue | Out-Null
-        Write-Log "Deployment successful (backend + frontend): $Commit"
-        Send-DiscordNotification "$IconOk **URBANIAC UPDATE SUCCESS**`nPrebuilt Windows executable and Activity frontend verified and deployed.`nCommit: $short"
-        return $true
-    }
-    catch {
-        Write-Log "New version startup failed: $($_.Exception.Message)"
-        Stop-AllBotProcesses
-        $feRestored = Restore-FrontendAfterFailure -HadCurrentBefore $hadFrontendBefore
-        if ($oldExe -and (Test-Path $oldExe)) {
-            Set-Content -Path $FailedCommitFile -Value $Commit
+        catch {
+            Write-Log "Aborting deployment of commit $short because existing bot process could not be stopped cleanly: $($_.Exception.Message)"
+            $reAdopted = Adopt-RunningBot
+            if (-not $reAdopted -and -not (Test-BotAlive) -and $oldExe -and (Test-Path $oldExe)) {
+                try {
+                    $null = Start-Bot $oldExe -AllowDegradedActivity
+                }
+                catch {
+                    Write-Log "Recovery start after failed stop also failed: $($_.Exception.Message)"
+                }
+            }
+            Send-DiscordNotification "$IconWarn **URBANIAC DEPLOY ABORTED**`nExisting bot process could not be stopped cleanly for commit $short; existing frontend was kept untouched."
+            return $false
+        }
+
+        $stateSnapshot = Get-DeploymentStateSnapshot
+        $hadFrontendBefore = $false
+        $frontendSwitched = $false
+        $candidateStarted = $false
+        try {
+            $hadFrontendBefore = [bool](Switch-StagedFrontend -StagePath $stagePath -Commit $Commit)
+            $frontendSwitched = $true
+            $null = Start-Bot $candidate.ExePath
+            $candidateStarted = $true
+
+            Write-StateFile $DeployedCommitFile $Commit
+            Write-StateFile $DeployedExeFile $candidate.ExePath
+            Write-StateFile $DeployedFrontendCommitFile $Commit
+            if ($candidate.BackendTreeHash) {
+                Write-StateFile $DeployedBackendHashFile $candidate.BackendTreeHash
+            }
+            Remove-Item $FailedCommitFile -Force -ErrorAction SilentlyContinue | Out-Null
+            Write-Log "Deployment successful (backend + frontend): $Commit"
+            Send-DiscordNotification "$IconOk **URBANIAC UPDATE SUCCESS**`nPrebuilt Windows executable and Activity frontend verified and deployed.`nCommit: $short"
+            return $true
+        }
+        catch {
+            Write-Log "Deployment step failed for commit $short : $($_.Exception.Message)"
             try {
-                Write-Log "Starting previous executable as fallback (frontend rolled back: $feRestored)."
-                Start-Bot $oldExe -AllowDegradedActivity
-                Send-DiscordNotification "$IconWarn **URBANIAC FALLBACK**`nNew version failed. Previous executable and frontend state restored.`nSkipped broken commit: $short"
+                Stop-AllBotProcesses
             }
             catch {
-                Write-Log "Fallback startup failed: $($_.Exception.Message)"
-                Send-DiscordNotification "$IconRed **URBANIAC OFFLINE**`nNew version and fallback both failed. Inspect laptop logs."
+                Write-Log "Warning: failed to stop process during rollback: $($_.Exception.Message)"
             }
-        }
-        else {
-            Set-Content -Path $FailedCommitFile -Value $Commit
-            Write-Log "No previous executable available for fallback."
-            Send-DiscordNotification "$IconRed **URBANIAC OFFLINE**`nNew version failed and no previous executable is available."
-        }
-        return $false
-    }
-}
 
-function Invoke-FallbackBotRecovery {
-    $exe = Read-TrimmedFile $DeployedExeFile
-    if (-not $exe -or -not (Test-Path $exe)) {
-        $exe = Join-Path $DeployRoot "release\urbaniac.exe"
+            $feRestored = $true
+            if ($frontendSwitched) {
+                $feRestored = Restore-FrontendAfterFailure -HadCurrentBefore $hadFrontendBefore
+            }
+            Restore-DeploymentStateSnapshot $stateSnapshot
+
+            if (-not $candidateStarted) {
+                Set-Content -Path $FailedCommitFile -Value $Commit
+            }
+
+            if ($oldExe -and (Test-Path $oldExe)) {
+                try {
+                    Write-Log "Starting previous executable as fallback (frontend rolled back: $feRestored)."
+                    $null = Start-Bot $oldExe -AllowDegradedActivity
+                    Send-DiscordNotification "$IconWarn **URBANIAC FALLBACK**`nNew version failed. Previous executable and frontend state restored.`nSkipped commit: $short"
+                }
+                catch {
+                    Write-Log "Fallback startup failed: $($_.Exception.Message)"
+                    Send-DiscordNotification "$IconRed **URBANIAC OFFLINE**`nNew version and fallback both failed. Inspect laptop logs."
+                }
+            }
+            else {
+                Write-Log "No previous executable available for fallback."
+                Send-DiscordNotification "$IconRed **URBANIAC OFFLINE**`nNew version failed and no previous executable is available."
+            }
+            return $false
+        }
     }
-    if (-not $exe -or -not (Test-Path $exe)) {
-        return $false
-    }
-    try {
-        Start-Bot $exe
-        return $true
-    }
-    catch {
-        Write-Log "Strict recovery failed ($($_.Exception.Message)). Retrying recovery allowing degraded Activity state."
-        Stop-AllBotProcesses
-        Start-Bot $exe -AllowDegradedActivity
-        return $true
+    finally {
+        Cleanup-FrontendStaging -StagePath $stagePath
     }
 }
 
@@ -755,20 +1013,20 @@ Write-Log "Urbaniac runtime-only supervisor starting. Cargo and Node builds are 
 
 try {
     $hasBot = Adopt-RunningBot
-    if ($hasBot) {
-        $null = Test-BotAndActivityHealthy
-    }
     $remoteCommit = Get-RemoteCommit
     Write-Log "GitHub main commit: $remoteCommit"
 
     $deployed = Deploy-Commit $remoteCommit
-    if (-not $deployed -and -not (Test-BotAndActivityHealthy)) {
-        if (-not (Invoke-FallbackBotRecovery) -and -not $hasBot) {
+    $startupHealthy = Test-BotAndActivityHealthy
+    if (-not $deployed -and -not $startupHealthy) {
+        $rec = Invoke-ControlledHealthRecovery -IsStartup
+        $startupHealthy = ($rec -eq "Healthy")
+        if ($rec -eq "Unavailable" -and -not $hasBot) {
             Write-Log "No running bot or previously deployed executable is available yet. Waiting in supervisor loop."
         }
     }
 
-    if (Test-BotAlive) {
+    if ($startupHealthy) {
         Send-DiscordNotification "$IconGreen **URBANIAC ONLINE**`nRuntime-only deployment supervisor is active."
     }
 }
@@ -777,7 +1035,8 @@ catch {
     Send-DiscordNotification "$IconWarn **URBANIAC STARTUP WARNING**`n$($_.Exception.Message)`nSupervisor remains active and will retry."
     if (-not (Test-BotAndActivityHealthy)) {
         try {
-            if (Invoke-FallbackBotRecovery) {
+            $rec = Invoke-ControlledHealthRecovery -IsStartup
+            if ($rec -eq "Healthy") {
                 Send-DiscordNotification "$IconGreen **URBANIAC ONLINE**`nRecovered previous executable after startup warning."
             }
         }
@@ -791,22 +1050,19 @@ catch {
 while ($true) {
     Start-Sleep -Seconds $CheckInterval
     try {
-        if (-not (Test-BotAndActivityHealthy)) {
-            Write-Log "Bot or Activity Web API is not healthy."
+        $deployed = $false
+        try {
+            $remoteCommit = Get-RemoteCommit
+            Write-Log "Checked GitHub main: $remoteCommit"
+            $deployed = Deploy-Commit $remoteCommit
+        }
+        catch {
+            Write-Log "GitHub check/deploy failed: $($_.Exception.Message)"
+            Send-DiscordNotification "$IconWarn **URBANIAC SUPERVISOR WARNING**`n$($_.Exception.Message)"
         }
 
-        $remoteCommit = Get-RemoteCommit
-        Write-Log "Checked GitHub main: $remoteCommit"
-        $deployed = Deploy-Commit $remoteCommit
-
         if (-not $deployed -and -not (Test-BotAndActivityHealthy)) {
-            Write-Log "Attempting bot recovery."
-            if (Invoke-FallbackBotRecovery) {
-                Send-DiscordNotification "$IconGreen **URBANIAC ONLINE**`nBot recovered successfully."
-            }
-            else {
-                Write-Log "No deployed executable available for recovery. Waiting for release."
-            }
+            $null = Invoke-ControlledHealthRecovery
         }
     }
     catch {
