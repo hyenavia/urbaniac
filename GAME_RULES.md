@@ -10,7 +10,8 @@ Semua angka di bawah adalah nilai awal sementara (spesifikasi tidak menentukanny
 | XP naik level (pemain dan aktivitas) | 100 x level | `domain/player::xp_to_next` |
 | Activity Slot dasar | 2 | `domain/activities::BASE_ACTIVITY_SLOTS` |
 | Durasi Farming / Gathering | 10 menit / 5 menit | `domain/activities::FARMING`, `GATHERING` |
-| XP per aktivitas selesai | 10 (aktivitas dan pemain) | `domain/activities` |
+| Durasi Fishing / Mining | 8 menit (Desa) / 12 menit (Kota Kecil) | `domain/activities::FISHING`, `MINING` |
+| XP per aktivitas selesai | 10 (Farm/Gather), 15 (Fishing), 20 (Mining) | `domain/activities` |
 | Undian reward | 3 undian per aktivitas, tabel drop di `domain/activities` | |
 | Bonus yield level aktivitas | +2% per level di atas 1 | `domain/activities::yield_bonus_pct` |
 | Level cap aktivitas | Kampung 10, Desa 20, Kota Kecil 30, Kota Dagang 40, Metropolis 50 | `domain/progression::activity_level_cap` |
@@ -34,7 +35,10 @@ diberikan saat pemain menekan Ambil Reward. Efficiency, Luck, Activity Tool, dan
 Saat level aktivitas sudah di cap, XP berlebih disimpan sebagai overflow dan otomatis diterapkan
 ketika cap naik (misalnya saat Balai Kampung menaikkan kota dari Kampung ke Desa).
 
-## Kota & Proyek
+## Crafting, Pesanan NPC, & Kru
+- **Crafting:** `Raw -> Processed -> Finished` (`domain/crafting`). Maks 2 crafting berjalan bersamaan; `Auto-Sell` dapat diaktifkan agar hasil craft langsung terjual ke harga pasar NPC.
+- **Pesanan NPC & Reputasi:** hingga 3 pesanan aktif dengan bonus +25% dari harga dasar NPC, ditambah +3% per level reputasi toko.
+- **Kru & Automasi:** maksimal 4 kru (`100.00 Bac` rekrut). Memberi bonus Efficiency (durasi), Yield (hasil), dan Luck (peluang roll ekstra), serta otomasi ulang aktivitas tanpa menambah Activity Slot.
 Setiap pemain memulai dengan kota berstatus **Kampung** dan City Treasury `0.00 Bac`.
 Hanya satu proyek kota yang dapat berjalan pada satu waktu, dan diselesaikan otomatis oleh scheduler persisten.
 

@@ -45,13 +45,19 @@ pub fn city_menu(owner: u64) -> Vec<CreateActionRow> {
 }
 
 pub fn activity_menu(owner: u64) -> Vec<CreateActionRow> {
-    vec![CreateActionRow::Buttons(vec![
-        btn("startact", owner, "farming", "Mulai Farming", ButtonStyle::Success),
-        btn("startact", owner, "gathering", "Mulai Gathering", ButtonStyle::Success),
-        btn("collect", owner, "", "Ambil Reward", ButtonStyle::Primary),
-        btn("activities", owner, "", "Refresh", ButtonStyle::Secondary),
-        btn("profile", owner, "", "Menu Utama", ButtonStyle::Secondary),
-    ])]
+    vec![
+        CreateActionRow::Buttons(vec![
+            btn("startact", owner, "farming", "Mulai Farming", ButtonStyle::Success),
+            btn("startact", owner, "gathering", "Mulai Gathering", ButtonStyle::Success),
+            btn("startact", owner, "fishing", "Mulai Fishing", ButtonStyle::Success),
+            btn("startact", owner, "mining", "Mulai Mining", ButtonStyle::Success),
+        ]),
+        CreateActionRow::Buttons(vec![
+            btn("collect", owner, "", "Ambil Reward", ButtonStyle::Primary),
+            btn("activities", owner, "", "Refresh", ButtonStyle::Secondary),
+            btn("profile", owner, "", "Menu Utama", ButtonStyle::Secondary),
+        ]),
+    ]
 }
 
 /// `items`: (nama, item_id, jumlah)
@@ -279,10 +285,12 @@ pub fn crew_assign_activity(owner: u64, crew_id: i64) -> Vec<CreateActionRow> {
         CreateActionRow::Buttons(vec![
             btn("crewset", owner, &format!("{crew_id}:farming:1"), "Farming + Auto", ButtonStyle::Success),
             btn("crewset", owner, &format!("{crew_id}:gathering:1"), "Gathering + Auto", ButtonStyle::Success),
-            btn("crewset", owner, &format!("{crew_id}:farming:0"), "Farming (Manual)", ButtonStyle::Primary),
-            btn("crewset", owner, &format!("{crew_id}:gathering:0"), "Gathering (Manual)", ButtonStyle::Primary),
+            btn("crewset", owner, &format!("{crew_id}:fishing:1"), "Fishing + Auto", ButtonStyle::Success),
+            btn("crewset", owner, &format!("{crew_id}:mining:1"), "Mining + Auto", ButtonStyle::Success),
         ]),
         CreateActionRow::Buttons(vec![
+            btn("crewset", owner, &format!("{crew_id}:farming:0"), "Farming (Manual)", ButtonStyle::Primary),
+            btn("crewset", owner, &format!("{crew_id}:gathering:0"), "Gathering (Manual)", ButtonStyle::Primary),
             btn("crewset", owner, &format!("{crew_id}:none:0"), "Lepas Tugas", ButtonStyle::Danger),
             btn("crew", owner, "", "Kembali", ButtonStyle::Secondary),
         ]),

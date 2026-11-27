@@ -9,15 +9,24 @@ pub const BASE_ACTIVITY_SLOTS: i64 = 2;
 pub enum ActivityKind {
     Farming,
     Gathering,
+    Fishing,
+    Mining,
 }
 
 impl ActivityKind {
-    pub const ALL: [ActivityKind; 2] = [ActivityKind::Farming, ActivityKind::Gathering];
+    pub const ALL: [ActivityKind; 4] = [
+        ActivityKind::Farming,
+        ActivityKind::Gathering,
+        ActivityKind::Fishing,
+        ActivityKind::Mining,
+    ];
 
     pub fn as_str(&self) -> &'static str {
         match self {
             ActivityKind::Farming => "farming",
             ActivityKind::Gathering => "gathering",
+            ActivityKind::Fishing => "fishing",
+            ActivityKind::Mining => "mining",
         }
     }
 
@@ -25,6 +34,8 @@ impl ActivityKind {
         match self {
             ActivityKind::Farming => "Farming",
             ActivityKind::Gathering => "Gathering",
+            ActivityKind::Fishing => "Fishing",
+            ActivityKind::Mining => "Mining",
         }
     }
 
@@ -36,6 +47,8 @@ impl ActivityKind {
     pub fn min_stage(&self) -> CityStage {
         match self {
             ActivityKind::Farming | ActivityKind::Gathering => CityStage::Kampung,
+            ActivityKind::Fishing => CityStage::Desa,
+            ActivityKind::Mining => CityStage::KotaKecil,
         }
     }
 }
@@ -80,10 +93,37 @@ pub static GATHERING: ActivityDef = ActivityDef {
     ],
 };
 
+pub static FISHING: ActivityDef = ActivityDef {
+    kind: ActivityKind::Fishing,
+    duration_secs: 480,
+    xp_reward: 15,
+    rolls: 3,
+    drops: &[
+        DropEntry { item_id: "river_fish", min: 2, max: 4, weight: 65 },
+        DropEntry { item_id: "silver_carp", min: 1, max: 2, weight: 28 },
+        DropEntry { item_id: "golden_eel", min: 1, max: 1, weight: 7 },
+    ],
+};
+
+pub static MINING: ActivityDef = ActivityDef {
+    kind: ActivityKind::Mining,
+    duration_secs: 720,
+    xp_reward: 20,
+    rolls: 3,
+    drops: &[
+        DropEntry { item_id: "stone", min: 2, max: 5, weight: 60 },
+        DropEntry { item_id: "iron_ore", min: 1, max: 3, weight: 28 },
+        DropEntry { item_id: "amethyst", min: 1, max: 1, weight: 10 },
+        DropEntry { item_id: "star_crystal", min: 1, max: 1, weight: 2 },
+    ],
+};
+
 pub fn def(kind: ActivityKind) -> &'static ActivityDef {
     match kind {
         ActivityKind::Farming => &FARMING,
         ActivityKind::Gathering => &GATHERING,
+        ActivityKind::Fishing => &FISHING,
+        ActivityKind::Mining => &MINING,
     }
 }
 

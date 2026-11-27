@@ -32,3 +32,14 @@ Semua perubahan skema dikelola lewat file migrasi SQLx berurutan di `migrations/
 ### `0007_market.sql`
 - **`npc_market_prices`**: harga dinamis NPC per item (`item_id` PK, `multiplier` 0.6000..1.6000, `recent_sales` tekanan suplai).
 - **`broker_listings`**: listing Makelar (`player_id`, `item_id`, `quantity`, `target_unit_price`, `listing_fee`, `status`: `active` | `sold` | `expired` | `cancelled`, `sold_unit_price`, `commission`, `expires_at`).
+
+### `0008_crafting_orders.sql`
+- **`crafting_jobs`**: antrean crafting (`recipe_id`, `quantity`, `status`: `running` | `completed`, `auto_sell`, `ends_at`).
+- **`shop_reputation`**: reputasi toko (`level`, `xp`, `completed_orders`, `auto_craft`, `auto_sell`).
+- **`npc_orders`**: pesanan NPC (`item_id`, `quantity`, `reward_bac`, `rep_xp`, `status`: `active` | `fulfilled` | `expired`).
+
+### `0009_crew.sql`
+- **`player_crews`**: kru pemain (`name`, `rarity`, `specialty`, `level`, `assigned_activity`, `auto_enabled`). Unique index per `(player_id, assigned_activity)`.
+
+### `0010_expansion.sql`
+- Seed `npc_market_prices` untuk item baru **Fishing** (`river_fish`, `silver_carp`, `golden_eel`) dan **Mining** (`stone`, `iron_ore`, `amethyst`, `star_crystal`).

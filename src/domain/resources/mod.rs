@@ -50,6 +50,15 @@ pub const ITEMS: &[ItemDef] = &[
     ItemDef { id: "bread", name: "Roti Kampung", rarity: Rarity::Common, stack_limit: 50, npc_price_cents: 2000 },
     ItemDef { id: "wooden_crate", name: "Peti Kayu", rarity: Rarity::Uncommon, stack_limit: 50, npc_price_cents: 2200 },
     ItemDef { id: "healing_tonic", name: "Tonik Herba", rarity: Rarity::Rare, stack_limit: 30, npc_price_cents: 5500 },
+    // Fishing (Desa)
+    ItemDef { id: "river_fish", name: "Ikan Sungai", rarity: Rarity::Common, stack_limit: 100, npc_price_cents: 500 },
+    ItemDef { id: "silver_carp", name: "Gurame Perak", rarity: Rarity::Uncommon, stack_limit: 50, npc_price_cents: 1600 },
+    ItemDef { id: "golden_eel", name: "Belut Emas", rarity: Rarity::Rare, stack_limit: 30, npc_price_cents: 4500 },
+    // Mining (Kota Kecil)
+    ItemDef { id: "stone", name: "Batu", rarity: Rarity::Common, stack_limit: 100, npc_price_cents: 450 },
+    ItemDef { id: "iron_ore", name: "Bijih Besi", rarity: Rarity::Uncommon, stack_limit: 50, npc_price_cents: 1800 },
+    ItemDef { id: "amethyst", name: "Kecubung", rarity: Rarity::Rare, stack_limit: 30, npc_price_cents: 6000 },
+    ItemDef { id: "star_crystal", name: "Kristal Bintang", rarity: Rarity::Epic, stack_limit: 20, npc_price_cents: 15000 },
 ];
 
 pub fn find_item(id: &str) -> Option<&'static ItemDef> {

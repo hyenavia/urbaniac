@@ -91,11 +91,7 @@ pub fn roll_recruit<R: Rng>(rng: &mut R) -> (&'static str, Rarity, ActivityKind)
     } else {
         Rarity::Epic
     };
-    let spec = if rng.gen_bool(0.5) {
-        ActivityKind::Farming
-    } else {
-        ActivityKind::Gathering
-    };
+    let spec = ActivityKind::ALL[rng.gen_range(0..ActivityKind::ALL.len())];
     (name, rarity, spec)
 }
 
