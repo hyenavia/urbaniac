@@ -51,6 +51,8 @@ jobs:
             throw "Build succeeded but executable was not found: $exe"
           }
           Get-Item $exe | Select-Object FullName, Length
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  urbaniac.exe" | Set-Content "target/SHA256SUMS.txt" -Encoding ascii
 
       - name: Publish commit-specific GitHub Release
         uses: softprops/action-gh-release@v2
@@ -61,5 +63,7 @@ jobs:
           prerelease: true
           draft: false
           generate_release_notes: false
-          files: target/x86_64-pc-windows-msvc/release/urbaniac.exe
+          files: |
+            target/x86_64-pc-windows-msvc/release/urbaniac.exe
+            target/SHA256SUMS.txt
           fail_on_unmatched_files: true
