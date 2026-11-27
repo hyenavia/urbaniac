@@ -9,6 +9,7 @@ use crate::config::ActivityConfig;
 use crate::web::auth::{DiscordAuthProvider, HttpDiscordAuth};
 use crate::web::events::EventHub;
 use crate::web::rate_limit::RateLimiter;
+use anyhow::Context;
 use axum::http::header::{CONTENT_SECURITY_POLICY, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS};
 use axum::http::HeaderValue;
 use axum::routing::{get, post};
@@ -22,7 +23,7 @@ use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
 
 const MAX_BODY_BYTES: usize = 64 * 1024;
-const CSP_POLICY: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com; connect-src 'self' https://discord.com https://*.discordsays.com; frame-ancestors https://discord.com https://*.discord.com https://*.discordsays.com";
+const CSP_POLICY: &str = "default-src 'self'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://cdn.discordapp.com; connect-src 'self' https://discord.com https://*.discordsays.com; frame-ancestors https://discord.com https://*.discord.com https://*.discordsays.com";
 
 pub struct WebState {
     pub pool: PgPool,
@@ -130,9 +131,22 @@ pub async fn run(
     }
 
     let router = build_router(state, Some(static_path));
-    let listener = tokio::net::TcpListener::bind(&cfg.bind_addr).await?;
+    let listener = match tokio::net::TcpListener::bind(&cfg.bind_addr).await {
+        Ok(listener) => listener,
+        Err(e) => {
+            tracing::error!(
+                bind_addr = %cfg.bind_addr,
+                error = %e,
+                "gagal bind port web Activity API"
+            );
+            return Err(anyhow::Error::new(e))
+                .context(format!("gagal bind web Activity API pada {}", cfg.bind_addr));
+        }
+    };
     tracing::info!(bind_addr = %cfg.bind_addr, "web Activity API berjalan");
-    axum::serve(listener, router).await?;
+    axum::serve(listener, router)
+        .await
+        .context("server web Activity API berhenti karena error")?;
     Ok(())
 }
 
@@ -213,7 +227,15 @@ mod tests {
 
         assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(resp.headers().get(X_CONTENT_TYPE_OPTIONS).unwrap(), "nosniff");
-        assert!(resp.headers().contains_key(CONTENT_SECURITY_POLICY));
+        let csp = resp
+            .headers()
+            .get(CONTENT_SECURITY_POLICY)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(csp.contains("script-src 'self'"));
+        assert!(csp.contains("worker-src 'self' blob:"));
+        assert!(!csp.contains("unsafe-eval"));
         assert_eq!(json_body(resp).await["status"], "ok");
 
         let cfg_resp = app

@@ -28,7 +28,7 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         output: {
           manualChunks: {
-            pixi: ["pixi.js"],
+            pixi: ["pixi.js", "pixi.js/unsafe-eval"],
             vendor: ["react", "react-dom", "@discord/embedded-app-sdk"],
           },
         },

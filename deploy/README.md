@@ -27,15 +27,15 @@ Supervisor tidak menjalankan `cargo` maupun `npm`/`node` di laptop. Semua aset d
 - `C:\UrbaniacDeploy\frontend\previous\` — versi frontend sebelumnya untuk rollback cepat.
 - `C:\UrbaniacDeploy\frontend\staging\` — folder sementara saat ekstrak & verifikasi `index.html`.
 - File state supervisor:
-  - `deployed-commit.txt`, `deployed-exe.txt`, `deployed-backend-hash.txt`, `deployed-frontend-commit.txt`, `bot.pid`.
+  - `deployed-commit.txt`, `deployed-exe.txt`, `deployed-backend-hash.txt`, `deployed-frontend-commit.txt`, `failed-commit.txt`, `bot.pid`.
 
 ---
 
 ## 3. Perilaku Perluasan Supervisor (`deploy/supervisor.ps1`)
 
-1. **Verifikasi SHA-256 & Kelengkapan Asset:** jika release belum ada atau salah satu asset belum selesai diunggah, supervisor mencatat log dan **tidak menyentuh bot maupun frontend yang sedang berjalan**.
-2. **Frontend-Only Update (Zero Bot Downtime):** jika `backend_tree_hash` (atau SHA-256 `urbaniac.exe`) sama dengan yang sedang berjalan, supervisor hanya memperbarui `C:\UrbaniacDeploy\frontend\current\` secara atomik **tanpa mematikan bot Rust**.
-3. **Update Backend + Frontend Terkoordinasi:** frontend diswap ke `current` (menyimpan versi lama di `previous`), lalu bot baru dijalankan dan diverifikasi log `"bot terhubung"`. Jika startup gagal, supervisor otomatis mengembalikan `previous -> current` dan menyalakan executable lama agar backend dan frontend tetap di commit yang sama.
+1. **Verifikasi SHA-256, Manifest, & Kelengkapan 5 Asset:** jika release belum ada atau salah satu dari 5 asset (`urbaniac.exe`, `SHA256SUMS.txt`, `frontend-dist.zip`, `frontend-dist.zip.sha256`, `release-manifest.json`) belum selesai diunggah, supervisor mencatat log dan **tidak menyentuh bot maupun frontend yang sedang berjalan**. `release-manifest.json` juga divalidasi silang terhadap commit target dan checksum.
+2. **Frontend-Only Update (Zero Bot Downtime):** jika `backend_tree_hash` (atau SHA-256 `urbaniac.exe`) sama dengan yang sedang berjalan dan health check Activity lolos, supervisor hanya memperbarui `C:\UrbaniacDeploy\frontend\current\` secara atomik **tanpa mematikan bot Rust**.
+3. **Update Backend + Frontend Terkoordinasi & Rollback Simetris:** frontend diswap ke `current` (menyimpan versi lama di `previous`), lalu bot baru dijalankan dan diverifikasi log `"bot terhubung"` serta `GET /api/health` jika `ACTIVITY_ENABLED=true`. Jika startup gagal, supervisor otomatis mengembalikan `previous -> current` (atau menghapus `current` baru jika itu deployment frontend pertama), menyalakan executable lama, dan mencatat `failed-commit.txt` agar commit rusak yang sama tidak dicoba ulang setiap 5 menit sampai `main` berubah.
 4. **Tahan Error Startup:** error jaringan/GitHub saat laptop boot tidak lagi menghentikan supervisor secara permanen; supervisor tetap masuk ke loop pemeriksaan 5 menit.
 
 ---

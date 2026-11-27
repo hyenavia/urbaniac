@@ -36,12 +36,17 @@ async fn main() -> Result<()> {
 
     if let Some(hub) = events {
         let activity_cfg = cfg.activity.clone();
+        let bind_addr = activity_cfg.bind_addr.clone();
         let web_pool = pool.clone();
         let web_notify = notify.clone();
         let duration_pct = cfg.activity_duration_pct;
         tokio::spawn(async move {
             if let Err(e) = web::run(activity_cfg, web_pool, web_notify, duration_pct, hub).await {
-                tracing::error!(error = ?e, "web Activity API berhenti dengan error");
+                tracing::error!(
+                    bind_addr = %bind_addr,
+                    error = ?e,
+                    "web Activity API berhenti dengan error"
+                );
             }
         });
     }
