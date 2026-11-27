@@ -71,13 +71,13 @@ pub async fn start(
     kind: ActivityKind,
     duration_pct: i64,
 ) -> Result<RunView, ActivityError> {
-    let stage = city::stage_for(player_id);
-    if stage < kind.min_stage() {
-        return Err(ActivityError::Locked(kind.min_stage()));
-    }
     let mut tx = pool.begin().await?;
     if !player_repo::lock(&mut *tx, player_id).await? {
         return Err(ActivityError::NotRegistered);
+    }
+    let stage = city::stage_for_conn(&mut *tx, player_id).await?;
+    if stage < kind.min_stage() {
+        return Err(ActivityError::Locked(kind.min_stage()));
     }
     let total = slot_total(player_id);
     if activity_repo::count_occupied(&mut *tx, player_id).await? >= total {
@@ -92,7 +92,7 @@ pub async fn start(
 
 pub async fn overview(pool: &PgPool, player_id: i64) -> anyhow::Result<ActivityOverview> {
     let mut conn = pool.acquire().await?;
-    let stage = city::stage_for(player_id);
+    let stage = city::stage_for_conn(&mut *conn, player_id).await?;
     let rows = activity_repo::list_active(&mut *conn, player_id).await?;
     let runs = rows
         .into_iter()
@@ -152,7 +152,7 @@ async fn claim_one(pool: &PgPool, player_id: i64, run_id: i64) -> anyhow::Result
     let kind = ActivityKind::parse(&run.activity)
         .ok_or_else(|| anyhow::anyhow!("aktivitas tidak dikenal: {}", run.activity))?;
 
-    let cap_slots = inventory::slot_capacity(player_id);
+    let cap_slots = inventory::slot_capacity_conn(&mut *tx, player_id).await?;
     let mut items = Vec::new();
     for (item_id, qty) in activity_repo::list_rewards(&mut *tx, run_id).await? {
         let Some(item) = find_item(&item_id) else { continue };
@@ -161,7 +161,7 @@ async fn claim_one(pool: &PgPool, player_id: i64, run_id: i64) -> anyhow::Result
     }
 
     let xp_gain = def(kind).xp_reward;
-    let cap = activity_level_cap(city::stage_for(player_id));
+    let cap = activity_level_cap(city::stage_for_conn(&mut *tx, player_id).await?);
     let old = activity_repo::lock_progress(&mut *tx, player_id, kind.as_str()).await?;
     let new = apply_xp(old, xp_gain, cap);
     activity_repo::save_progress(&mut *tx, player_id, kind.as_str(), new).await?;

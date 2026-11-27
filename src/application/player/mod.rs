@@ -1,14 +1,17 @@
 use crate::application::{economy, inventory};
 use crate::domain::economy::starter_bac;
 use crate::domain::player::Player;
-use crate::infrastructure::repositories::{player_repo, wallet_repo};
+use crate::infrastructure::repositories::{city_repo, player_repo, wallet_repo};
 use anyhow::anyhow;
 use rust_decimal::Decimal;
 use sqlx::PgPool;
 
+use crate::domain::city::CityStage;
+
 pub struct ProfileView {
     pub player: Player,
     pub balance: Decimal,
+    pub city_stage: CityStage,
     pub inventory: inventory::InventoryView,
 }
 
@@ -29,6 +32,7 @@ pub async fn register(
     } else {
         player_repo::update_profile(&mut *tx, id, username, avatar).await?;
     }
+    city_repo::create(&mut *tx, id).await?;
     let player = player_repo::get(&mut *tx, id)
         .await?
         .ok_or_else(|| anyhow!("pemain tidak ditemukan setelah registrasi"))?;
@@ -55,6 +59,7 @@ pub async fn update_player_profile(
 pub async fn get_player_profile(pool: &PgPool, id: i64) -> anyhow::Result<Option<ProfileView>> {
     let Some(player) = get_player(pool, id).await? else { return Ok(None) };
     let balance = economy::balance(pool, id).await?;
+    let city_stage = crate::application::city::stage_for(pool, id).await?;
     let inventory = inventory::view(pool, id).await?;
-    Ok(Some(ProfileView { player, balance, inventory }))
+    Ok(Some(ProfileView { player, balance, city_stage, inventory }))
 }

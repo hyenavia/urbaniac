@@ -76,8 +76,9 @@ async fn full_activity_flow_survives_restart(pool: PgPool) {
 async fn sell_to_npc_updates_inventory_and_wallet_idempotently(pool: PgPool) {
     player::register(&pool, 12, "c", None).await.unwrap();
     let wheat = find_item("wheat").unwrap(); // 3.00 Bac
+    let cap = inventory::slot_capacity(&pool, 12).await.unwrap();
     let mut tx = pool.begin().await.unwrap();
-    inventory_repo::add_item(&mut *tx, 12, wheat, 10, inventory::slot_capacity(12)).await.unwrap();
+    inventory_repo::add_item(&mut *tx, 12, wheat, 10, cap).await.unwrap();
     tx.commit().await.unwrap();
 
     let out = economy::sell_to_npc(&pool, 12, "wheat", SellQty::Exact(4), "sale-1").await.unwrap();

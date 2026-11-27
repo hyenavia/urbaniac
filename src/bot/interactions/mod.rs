@@ -1,9 +1,11 @@
 use crate::application::economy::{self, SaleOutcome, SellError, SellQty};
-use crate::application::{activities, inventory, player};
+use crate::application::{activities, city, inventory, player};
 use crate::bot::{commands, components, embeds, AppState};
 use crate::domain::activities::ActivityKind;
+use crate::domain::city::ProjectId;
 use crate::domain::economy::format_bac;
 use crate::domain::resources::find_item;
+use rust_decimal::Decimal;
 use serenity::all::*;
 
 pub async fn handle_command(
@@ -47,6 +49,17 @@ async fn show_activities(
 ) -> anyhow::Result<()> {
     let ov = activities::overview(&app.pool, id).await?;
     update(ctx, c, embeds::activities(&ov, note), components::activity_menu(id as u64)).await
+}
+
+async fn show_city(
+    ctx: &Context,
+    c: &ComponentInteraction,
+    app: &AppState,
+    id: i64,
+    note: Option<String>,
+) -> anyhow::Result<()> {
+    let ov = city::overview(&app.pool, id).await?;
+    update(ctx, c, embeds::city(&ov, note), components::city_menu(id as u64)).await
 }
 
 pub async fn handle_component(
@@ -109,6 +122,50 @@ pub async fn handle_component(
         "collect" => {
             let sums = activities::collect_ready(&app.pool, id).await?;
             show_activities(ctx, c, app, id, Some(embeds::claim_note(&sums))).await
+        }
+        "city" => show_city(ctx, c, app, id, None).await,
+        "cityproj" => {
+            let Some(proj) = ProjectId::parse(rest) else { return Ok(()) };
+            let key = format!("cityproj:{}", c.id.get());
+            let note = match city::start_project(
+                &app.pool,
+                id,
+                proj,
+                app.activity_duration_pct,
+                &key,
+            )
+            .await
+            {
+                Ok(run) => {
+                    app.notify.notify_one();
+                    format!(
+                        "Proyek {} dimulai — selesai <t:{}:R>.",
+                        proj.name(),
+                        run.ends_at.timestamp()
+                    )
+                }
+                Err(city::CityError::Db(e)) => return Err(e.into()),
+                Err(city::CityError::Wallet(e)) => return Err(e.into()),
+                Err(e) => e.to_string(),
+            };
+            show_city(ctx, c, app, id, Some(note)).await
+        }
+        "citydep" => {
+            let Ok(bac) = rest.parse::<i64>() else { return Ok(()) };
+            let amount = Decimal::new(bac * 100, 2);
+            let key = format!("citydep:{}", c.id.get());
+            let note = match city::deposit_to_treasury(&app.pool, id, amount, &key).await {
+                Ok((wallet, treasury)) => format!(
+                    "Berhasil setor {} ke City Treasury. Treasury: {}, Wallet: {}.",
+                    format_bac(amount),
+                    format_bac(treasury),
+                    format_bac(wallet)
+                ),
+                Err(city::CityError::Db(e)) => return Err(e.into()),
+                Err(city::CityError::Wallet(e)) => return Err(e.into()),
+                Err(e) => e.to_string(),
+            };
+            show_city(ctx, c, app, id, Some(note)).await
         }
         "sell" => {
             let v = inventory::view(&app.pool, id).await?;

@@ -1,9 +1,11 @@
 use crate::application::activities::{ActivityOverview, ClaimSummary, RunStatus};
+use crate::application::city::CityOverview;
 use crate::application::inventory::{InventoryLine, InventoryView};
 use crate::application::player::ProfileView;
+use crate::domain::city::{def as project_def, project_cost_bac, ProjectId};
 use crate::domain::economy::{format_bac, npc_buy_price};
-use crate::domain::resources::ItemDef;
 use crate::domain::player::xp_to_next;
+use crate::domain::resources::{find_item, ItemDef};
 use serenity::all::{Colour, CreateEmbed};
 
 const COLOR: u32 = 0x2ecc71;
@@ -16,10 +18,9 @@ pub fn help() -> CreateEmbed {
             "Urbaniac adalah game ekonomi dan pembangunan kota.\n\n\
              `/start` — buat profil dan buka menu\n\
              `/help` — tampilkan bantuan ini\n\n\
-             Tombol di menu: **Profil**, **Inventory**, **Aktivitas**, **Jual**, **Klaim Pending**.\n\
+             Tombol di menu: **Profil**, **Inventory**, **Aktivitas**, **Kota**, **Jual**, **Klaim Pending**.\n\
              Mulai Farming atau Gathering di menu Aktivitas; aktivitas tetap berjalan saat kamu offline. \
-             Setelah selesai, tekan **Ambil Reward**, lalu jual hasilnya ke NPC.\n\
-             Proyek kota menyusul di tahap berikutnya.",
+             Setelah selesai, tekan **Ambil Reward**, jual hasilnya ke NPC, lalu bangun proyek di menu **Kota**.",
         )
 }
 
@@ -39,6 +40,7 @@ pub fn profile(p: &ProfileView) -> CreateEmbed {
             true,
         )
         .field("Bac", format_bac(p.balance), true)
+        .field("Kota", p.city_stage.name(), true)
         .field(
             "Inventory",
             format!("{}/{} slot", p.inventory.slots_used, p.inventory.slot_capacity),
@@ -184,4 +186,66 @@ pub fn sell_item(item: &ItemDef, owned: i64) -> CreateEmbed {
             format_bac(npc_buy_price(item))
         ))
         .colour(Colour::new(COLOR))
+}
+
+pub fn city(ov: &CityOverview, note: Option<String>) -> CreateEmbed {
+    let facilities = if ov.facilities.is_empty() {
+        "Belum ada fasilitas.".to_string()
+    } else {
+        ov.facilities
+            .iter()
+            .map(|f| format!("{} Lv {}", f.id.name(), f.level))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let running = match &ov.running_project {
+        Some(r) => format!(
+            "{} — selesai <t:{}:R>",
+            r.project.name(),
+            r.ends_at.timestamp()
+        ),
+        None => "Tidak ada proyek berjalan.".to_string(),
+    };
+    let projects = ProjectId::ALL
+        .iter()
+        .map(|&pid| {
+            let p = project_def(pid);
+            let built = ov.facilities.iter().any(|f| f.id == pid);
+            if built {
+                format!("**{}** — sudah dibangun", p.name)
+            } else {
+                let items = p
+                    .cost_items
+                    .iter()
+                    .map(|(id, qty)| {
+                        let name = find_item(id).map(|i| i.name).unwrap_or(id);
+                        format!("{name} x{qty}")
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "**{}** — {} + {} ({} menit)\n{}",
+                    p.name,
+                    format_bac(project_cost_bac(p)),
+                    items,
+                    p.duration_secs / 60,
+                    p.description
+                )
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    let mut e = CreateEmbed::new()
+        .title(format!("Kota — {}", ov.stage.name()))
+        .colour(Colour::new(COLOR))
+        .field("City Treasury", format_bac(ov.treasury), true)
+        .field("Wallet Pribadi", format_bac(ov.wallet_balance), true)
+        .field("Fasilitas", facilities, false)
+        .field("Proyek Berjalan", running, false)
+        .field("Daftar Proyek", projects, false);
+    if let Some(n) = note {
+        e = e.description(n);
+    }
+    e
 }

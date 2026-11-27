@@ -12,13 +12,31 @@ fn btn(action: &str, owner: u64, rest: &str, label: &str, style: ButtonStyle) ->
 }
 
 pub fn main_menu(owner: u64) -> Vec<CreateActionRow> {
-    vec![CreateActionRow::Buttons(vec![
-        btn("profile", owner, "", "Profil", ButtonStyle::Primary),
-        btn("inventory", owner, "", "Inventory", ButtonStyle::Secondary),
-        btn("activities", owner, "", "Aktivitas", ButtonStyle::Primary),
-        btn("sell", owner, "", "Jual", ButtonStyle::Success),
-        btn("claim", owner, "", "Klaim Pending", ButtonStyle::Secondary),
-    ])]
+    vec![
+        CreateActionRow::Buttons(vec![
+            btn("profile", owner, "", "Profil", ButtonStyle::Primary),
+            btn("inventory", owner, "", "Inventory", ButtonStyle::Secondary),
+            btn("activities", owner, "", "Aktivitas", ButtonStyle::Primary),
+            btn("city", owner, "", "Kota", ButtonStyle::Primary),
+            btn("sell", owner, "", "Jual", ButtonStyle::Success),
+        ]),
+        CreateActionRow::Buttons(vec![btn("claim", owner, "", "Klaim Pending", ButtonStyle::Secondary)]),
+    ]
+}
+
+pub fn city_menu(owner: u64) -> Vec<CreateActionRow> {
+    vec![
+        CreateActionRow::Buttons(vec![
+            btn("cityproj", owner, "well", "Bangun Sumur", ButtonStyle::Success),
+            btn("cityproj", owner, "granary", "Bangun Lumbung", ButtonStyle::Success),
+            btn("cityproj", owner, "town_hall", "Bangun Balai Kampung", ButtonStyle::Success),
+        ]),
+        CreateActionRow::Buttons(vec![
+            btn("citydep", owner, "50", "Setor 50 Bac", ButtonStyle::Primary),
+            btn("city", owner, "", "Refresh", ButtonStyle::Secondary),
+            btn("profile", owner, "", "Menu Utama", ButtonStyle::Secondary),
+        ]),
+    ]
 }
 
 pub fn activity_menu(owner: u64) -> Vec<CreateActionRow> {

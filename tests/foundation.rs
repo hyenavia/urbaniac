@@ -39,7 +39,7 @@ async fn wallet_is_idempotent_and_never_negative(pool: PgPool) {
 async fn overflow_goes_to_pending_and_can_be_claimed(pool: PgPool) {
     player::register(&pool, 3, "c", None).await.unwrap();
     let wheat = find_item("wheat").unwrap(); // stack 100
-    let cap = inventory::slot_capacity(3);
+    let cap = inventory::slot_capacity(&pool, 3).await.unwrap();
 
     let mut tx = pool.begin().await.unwrap();
     let p = inventory_repo::add_item(&mut *tx, 3, wheat, 130, cap).await.unwrap();

@@ -58,22 +58,24 @@ Syarat keluar:
 - [x] Jual item: inventory berkurang, Bac bertambah sesuai harga; saldo benar di Profil
 - [x] Inventory penuh saat ambil reward: sisa masuk Pending Claim, bisa diklaim setelah ada ruang
 
-### Milestone 3 — Kota dan dokumentasi (belum dimulai)
+### Milestone 3 — Kota dan dokumentasi
+**Status:** kode ditulis, siap diuji di host PostgreSQL & bot Discord.
+
 Isi:
-- [ ] Tabel kota per pemain, City Stage Kampung dibuat saat `/start`
-- [ ] City Treasury terpisah dari Player Wallet
-- [ ] Project vs Facility; proyek awal Sumur, Lumbung, Balai Kampung dengan durasi dan biaya
-- [ ] Penyelesaian proyek lewat scheduler yang sama (jenis job baru)
-- [ ] Lumbung menambah slot dan kapasitas inventory (menggantikan `slot_capacity` konstan)
-- [ ] `activity_level_cap` dan unlock aktivitas memakai stage kota nyata
-- [ ] ARCHITECTURE.md, DATABASE.md, HARDWARE_SETUP.md (GAME_RULES, README, SETUP_WINDOWS diperbarui)
+- [x] Tabel kota per pemain, City Stage Kampung dibuat saat `/start` (`0006_cities.sql`)
+- [x] City Treasury terpisah dari Player Wallet (`city_treasury_ledger`)
+- [x] Project vs Facility; proyek awal Sumur, Lumbung, Balai Kampung dengan durasi dan biaya
+- [x] Penyelesaian proyek lewat scheduler yang sama (`city_project_complete`)
+- [x] Lumbung menambah slot dan kapasitas inventory (menggantikan `slot_capacity` konstan)
+- [x] `activity_level_cap` dan unlock aktivitas memakai stage kota nyata
+- [x] ARCHITECTURE.md, DATABASE.md, HARDWARE_SETUP.md (GAME_RULES, README, SETUP_WINDOWS diperbarui)
 
 Syarat keluar:
-- [ ] Semua perintah cek/test lolos, termasuk tes baru untuk kota dan proyek
+- [~] Semua perintah cek/test lolos, termasuk tes baru untuk kota dan proyek (`tests/stage3.rs`, dijalankan di host PostgreSQL)
 - [ ] Mulai proyek, restart bot, proyek tetap selesai
 - [ ] Bac tidak cukup atau resource kurang: proyek ditolak tanpa mengubah saldo
 - [ ] Seluruh daftar "Pemain harus dapat" di bagian 6 spesifikasi bisa dilakukan end-to-end
-- [ ] Enam dokumen wajib ada dan sesuai kode
+- [x] Enam dokumen wajib ada dan sesuai kode
 
 **Penutup base code:** setelah Milestone 3 lolos, beri tag `base-playable`.
 
