@@ -144,14 +144,36 @@ function Get-DeploymentStateSnapshot {
     )
     $entries = @()
     foreach ($p in $paths) {
-        $exists = [bool](Test-Path -Path $p -PathType Leaf)
-        $content = ""
-        if ($exists) {
-            $content = Read-TrimmedFile $p
+        $item = $null
+        try {
+            $item = Get-Item -LiteralPath $p -Force -ErrorAction Stop
         }
+        catch [System.Management.Automation.ItemNotFoundException], [System.IO.FileNotFoundException], [System.IO.DirectoryNotFoundException] {
+            $entries += [PSCustomObject]@{
+                Path    = $p
+                Exists  = $false
+                Content = ""
+            }
+            continue
+        }
+        catch {
+            throw "Failed to inspect deployment state file '$p': $($_.Exception.Message)"
+        }
+
+        if ($item.PSIsContainer) {
+            throw "Deployment state path '$p' is a directory, expected a file."
+        }
+
+        try {
+            $content = [System.IO.File]::ReadAllText($item.FullName)
+        }
+        catch {
+            throw "Failed to read deployment state file '$p': $($_.Exception.Message)"
+        }
+
         $entries += [PSCustomObject]@{
             Path    = $p
-            Exists  = $exists
+            Exists  = $true
             Content = $content
         }
     }
@@ -160,16 +182,39 @@ function Get-DeploymentStateSnapshot {
 
 function Restore-DeploymentStateSnapshot($Snapshot) {
     if (-not $Snapshot) { return }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     foreach ($entry in $Snapshot) {
         try {
             if ($entry.Exists) {
-                $current = Read-TrimmedFile $entry.Path
-                if ($current -ne $entry.Content) {
-                    Write-StateFile $entry.Path $entry.Content
+                $needsRestore = $true
+                if (Test-Path -LiteralPath $entry.Path -PathType Leaf) {
+                    try {
+                        $current = [System.IO.File]::ReadAllText($entry.Path)
+                        if ($current -ceq $entry.Content) {
+                            $needsRestore = $false
+                        }
+                    }
+                    catch {
+                        $needsRestore = $true
+                    }
+                }
+                if ($needsRestore) {
+                    $tmpPath = "$($entry.Path).tmp"
+                    Remove-Item -Path $tmpPath -Force -ErrorAction SilentlyContinue | Out-Null
+                    try {
+                        Invoke-WithRetry {
+                            [System.IO.File]::WriteAllText($tmpPath, $entry.Content, $utf8NoBom)
+                            Move-Item -LiteralPath $tmpPath -Destination $entry.Path -Force
+                        } | Out-Null
+                    }
+                    catch {
+                        Remove-Item -Path $tmpPath -Force -ErrorAction SilentlyContinue | Out-Null
+                        throw
+                    }
                 }
             }
-            elseif (Test-Path -Path $entry.Path) {
-                Remove-Item -Path $entry.Path -Force -ErrorAction SilentlyContinue | Out-Null
+            elseif (Test-Path -LiteralPath $entry.Path) {
+                Remove-Item -LiteralPath $entry.Path -Force -ErrorAction SilentlyContinue | Out-Null
             }
         }
         catch {
