@@ -185,3 +185,16 @@ Isi:
 - [x] Migrasi `0015_progression_rewards.sql`: tabel klaim idempoten reward progresi pemain
 - [x] Domain `domain/progression` & `activities::flush_overflow_for_stage_conn`: XP overflow langsung diterapkan lintas stage saat stage kota naik, plus bonus Bac otomatis di Level 5, 10, 15, 25
 - [x] `tests/stage11.rs`
+
+---
+
+## Bagian C — Discord Activity (Kota Visual)
+
+Rancangan dan keputusan teknis ada di **ACTIVITY_DESIGN.md**. Bot Discord tetap berjalan berdampingan; Activity menggunakan `application/`, `domain/`, `infrastructure/`, dan database PostgreSQL yang sama melalui modul `web/` (Axum, opt-in via `ACTIVITY_ENABLED=true`) dan frontend `activity/` (React + TypeScript + Vite + PixiJS + `@discord/embedded-app-sdk`).
+
+- [~] **Tahap 0 — Sinkronisasi Dokumen & Konfigurasi Dasar:** `ACTIVITY_DESIGN.md`, `.gitignore`, `.env.example`, dan rencana bertahap di `MILESTONES.md`.
+- [~] **Tahap 1 — Backend Web API (`web/` Axum, Opt-In, Auth & Read-Only):** `POST /api/token`, middleware auth terverifikasi Discord (`/users/@me`) dengan cache TTL/kapasitas terbatas, rate limit, header keamanan, static serving eksternal (`ACTIVITY_STATIC_DIR`), `GET /api/health`, `/api/me`, `/api/city`, `/api/city/projects/quote`, `/api/inventory`, `/api/activities`, serta unit & integration test isolasi pemain.
+- [x] **Tahap 2 — Frontend `activity/` (Read-Only & Scene 3/4 View):** proyek Vite + React + TypeScript + PixiJS, alur SDK `ready -> authorize -> /api/token -> authenticate`, Mock API untuk dev PC, dan peta kota Sudut 3/4 dengan aset placeholder terstruktur.
+- [x] **Tahap 3 — Interaksi Penuh (Mutasi & Panel Aksi):** endpoint mutasi idempoten (`register`, `activities/start`, `activities/collect`, `market/sell`, `inventory/claim`, `city/projects/start`, `city/treasury/*`, `city/tax`) + panel aksi & konfirmasi biaya di Activity.
+- [~] **Tahap 4 — Real-Time (SSE) & Ekspansi Fitur Fase 2–9:** `GET /api/events` (SSE ber-batas), panel Pasar & Makelar, Crafting & Pesanan NPC, Kru & Automasi, i18n `En`/`Id`, dan polish mobile/desktop.
+- [~] **Tahap 5 — CI/CD Frontend & Ekspansi Supervisor:** workflow terpisah/terpadu merilis `frontend-dist.zip` + checksum + manifest bersama `urbaniac.exe`, `deploy/supervisor.ps1` mengunduh/verifikasi/swap atomik frontend tanpa mematikan bot pada frontend-only update, serta dokumentasi migrasi di `deploy/README.md`.

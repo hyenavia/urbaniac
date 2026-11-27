@@ -5,13 +5,23 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
+axum = "0.8"
 thiserror = "1"
 chrono = "0.4"
 dotenvy = "0.15"
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rust_decimal = "1"
 rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 serenity = "0.12"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "rust_decimal", "chrono", "migrate", "macros", "derive"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }
+tower-http = { version = "0.6", features = ["fs", "limit", "set-header"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }
