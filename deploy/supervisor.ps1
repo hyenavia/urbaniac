@@ -918,6 +918,9 @@ function Deploy-Commit([string]$Commit) {
     }
 
     try {
+        # Capture state snapshot before stopping the running bot so snapshot read errors never stop the live bot.
+        $stateSnapshot = Get-DeploymentStateSnapshot
+
         # Stop the old backend before activating the new frontend so a stop failure never pairs new frontend with old backend.
         try {
             Stop-AllBotProcesses
@@ -937,7 +940,6 @@ function Deploy-Commit([string]$Commit) {
             return $false
         }
 
-        $stateSnapshot = Get-DeploymentStateSnapshot
         $hadFrontendBefore = $false
         $frontendSwitched = $false
         $candidateStarted = $false
