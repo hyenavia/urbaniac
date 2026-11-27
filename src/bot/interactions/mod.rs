@@ -18,6 +18,7 @@ pub async fn handle_command(
     match cmd.data.name.as_str() {
         "start" => commands::start::run(ctx, cmd, app).await,
         "help" => commands::help::run(ctx, cmd, app).await,
+        "host" => commands::host::run(ctx, cmd, app).await,
         other => {
             tracing::warn!(command = other, "command tidak dikenal");
             Ok(())
@@ -118,6 +119,55 @@ async fn show_crew(
     .await
 }
 
+async fn handle_play_button(
+    ctx: &Context,
+    c: &ComponentInteraction,
+    app: &AppState,
+) -> anyhow::Result<()> {
+    if c.guild_id.is_none() {
+        return deny(ctx, c, "Gunakan tombol Play di channel server untuk membuat Private Thread.").await;
+    }
+    let uid = c.user.id;
+    let pid = uid.get() as i64;
+    let avatar = c.user.avatar_url();
+    let (_, created) = player::register(&app.pool, pid, &c.user.name, avatar.as_deref()).await?;
+    let Some(profile) = player::get_player_profile(&app.pool, pid).await? else {
+        return deny(ctx, c, "Gagal memuat profil.").await;
+    };
+
+    let msg = CreateMessage::new()
+        .content(format!("<@{}>", uid.get()))
+        .embed(embeds::welcome(&profile, created))
+        .components(components::main_menu(uid.get()));
+
+    if let Some(tid) = player::get_thread_id(&app.pool, pid).await? {
+        let ch = ChannelId::new(tid);
+        if ch.send_message(&ctx.http, msg.clone()).await.is_ok() {
+            return deny(ctx, c, &format!("Thread pribadimu siap: <#{tid}>")).await;
+        }
+    }
+
+    let thread = c
+        .channel_id
+        .create_thread(
+            &ctx.http,
+            CreateThread::new(format!("urbaniac-{}", c.user.name))
+                .kind(ChannelType::PrivateThread)
+                .invitable(false),
+        )
+        .await?;
+    thread.id.add_thread_member(&ctx.http, uid).await?;
+    player::set_thread_id(&app.pool, pid, thread.id.get()).await?;
+    thread.id.send_message(&ctx.http, msg).await?;
+
+    deny(
+        ctx,
+        c,
+        &format!("Private Thread pribadimu dibuat: <#{}>", thread.id.get()),
+    )
+    .await
+}
+
 pub async fn handle_component(
     ctx: &Context,
     c: &ComponentInteraction,
@@ -126,9 +176,12 @@ pub async fn handle_component(
     let Some((action, owner, rest)) = components::parse_custom_id(&c.data.custom_id) else {
         return Ok(()); // bukan komponen milik kita
     };
+    if action == "play" && owner == 0 {
+        return handle_play_button(ctx, c, app).await;
+    }
     // Validasi pemilik data.
     if c.user.id.get() != owner {
-        return deny(ctx, c, "Menu ini milik pemain lain. Jalankan /start untuk menu milikmu.").await;
+        return deny(ctx, c, "Menu ini milik pemain lain. Jalankan /start atau tekan Play untuk menu milikmu.").await;
     }
     let id = owner as i64;
     let Some(profile) = player::get_player_profile(&app.pool, id).await? else {

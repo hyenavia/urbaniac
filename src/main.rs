@@ -1,5 +1,6 @@
 use anyhow::Result;
-use std::sync::Arc;
+use serenity::all::Http;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::Notify;
 use tracing_subscriber::EnvFilter;
 use urbaniac::{bot, config::Config, infrastructure::database, workers};
@@ -17,8 +18,14 @@ async fn main() -> Result<()> {
 
     // Satu instance scheduler. Job yang tertunda saat bot mati akan diproses saat start.
     let notify = Arc::new(Notify::new());
-    tokio::spawn(workers::run_scheduler(pool.clone(), notify.clone(), cfg.activity_duration_pct));
+    let http_slot: Arc<OnceLock<Arc<Http>>> = Arc::new(OnceLock::new());
+    tokio::spawn(workers::run_scheduler(
+        pool.clone(),
+        notify.clone(),
+        cfg.activity_duration_pct,
+        http_slot.clone(),
+    ));
 
     tracing::info!("database siap, menjalankan bot");
-    bot::run(cfg, pool, notify).await
+    bot::run(cfg, pool, notify, http_slot).await
 }

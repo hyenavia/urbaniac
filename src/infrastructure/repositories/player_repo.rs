@@ -66,3 +66,21 @@ pub async fn set_progress(conn: &mut PgConnection, id: i64, level: i32, xp: i64)
         .await?;
     Ok(())
 }
+
+pub async fn get_thread_id(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<i64>> {
+    let tid: Option<Option<i64>> =
+        sqlx::query_scalar("SELECT thread_id FROM players WHERE discord_user_id = $1")
+            .bind(id)
+            .fetch_optional(&mut *conn)
+            .await?;
+    Ok(tid.flatten())
+}
+
+pub async fn set_thread_id(conn: &mut PgConnection, id: i64, thread_id: i64) -> sqlx::Result<()> {
+    sqlx::query("UPDATE players SET thread_id = $2, updated_at = now() WHERE discord_user_id = $1")
+        .bind(id)
+        .bind(thread_id)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}

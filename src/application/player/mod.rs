@@ -63,3 +63,14 @@ pub async fn get_player_profile(pool: &PgPool, id: i64) -> anyhow::Result<Option
     let inventory = inventory::view(pool, id).await?;
     Ok(Some(ProfileView { player, balance, city_stage, inventory }))
 }
+
+pub async fn get_thread_id(pool: &PgPool, id: i64) -> anyhow::Result<Option<u64>> {
+    let mut conn = pool.acquire().await?;
+    Ok(player_repo::get_thread_id(&mut *conn, id).await?.map(|t| t as u64))
+}
+
+pub async fn set_thread_id(pool: &PgPool, id: i64, thread_id: u64) -> anyhow::Result<()> {
+    let mut conn = pool.acquire().await?;
+    player_repo::set_thread_id(&mut *conn, id, thread_id as i64).await?;
+    Ok(())
+}

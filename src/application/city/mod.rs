@@ -186,25 +186,36 @@ pub async fn start_project(
 }
 
 /// Dipanggil worker di dalam transaksi job. Idempoten: hanya memproses proyek berstatus 'running'.
-pub async fn complete_project(conn: &mut PgConnection, project_run_id: i64) -> anyhow::Result<()> {
+pub async fn complete_project(
+    conn: &mut PgConnection,
+    project_run_id: i64,
+) -> anyhow::Result<Option<(i64, String)>> {
     let Some(proj) = city_repo::lock_project(conn, project_run_id).await? else {
-        return Ok(());
+        return Ok(None);
     };
     if proj.status != "running" {
-        return Ok(());
+        return Ok(None);
     }
     let kind = ProjectId::parse(&proj.project_id)
         .ok_or_else(|| anyhow::anyhow!("proyek tidak dikenal: {}", proj.project_id))?;
 
     city_repo::upsert_facility(conn, proj.player_id, kind.as_str()).await?;
+    let mut extra = "";
     if kind == ProjectId::TownHall {
         let stage = stage_for_conn(conn, proj.player_id).await?;
         if stage == CityStage::Kampung {
             city_repo::set_stage(conn, proj.player_id, CityStage::Desa.as_str()).await?;
+            extra = " Kotamu naik ke stage **Desa**!";
         }
     }
     city_repo::mark_project_completed(conn, project_run_id).await?;
-    Ok(())
+    let msg = format!(
+        "<@{}> 🏗️ Proyek **{}** selesai!{}",
+        proj.player_id,
+        kind.name(),
+        extra
+    );
+    Ok(Some((proj.player_id, msg)))
 }
 
 /// Memindahkan Bac dari Player Wallet ke City Treasury secara atomik.

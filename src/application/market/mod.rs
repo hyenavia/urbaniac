@@ -1,5 +1,5 @@
 use crate::application::inventory;
-use crate::domain::economy::npc_buy_price;
+use crate::domain::economy::{format_bac, npc_buy_price};
 use crate::domain::market::{
     calc_listing_fee, calc_sale_settlement, dynamic_price, next_multiplier, ListingDuration,
     MARKET_TICK_SECS, MAX_ACTIVE_LISTINGS,
@@ -224,19 +224,38 @@ pub async fn cancel_listing(
 }
 
 /// Dipanggil worker saat durasi listing habis. Idempoten: hanya memproses listing 'active'.
-pub async fn expire_listing(conn: &mut PgConnection, listing_id: i64) -> anyhow::Result<()> {
+pub async fn expire_listing(
+    conn: &mut PgConnection,
+    listing_id: i64,
+) -> anyhow::Result<Option<(i64, String)>> {
     let Some(listing) = market_repo::lock_listing(conn, listing_id).await? else {
-        return Ok(());
+        return Ok(None);
     };
     if listing.status != "active" {
-        return Ok(());
+        return Ok(None);
     }
+    let mut note = format!(
+        "<@{}> 📦 Listing Makelar #{} kedaluwarsa.",
+        listing.player_id, listing.id
+    );
     if let Some(item) = find_item(&listing.item_id) {
         let cap = inventory::slot_capacity_conn(conn, listing.player_id).await?;
-        inventory_repo::add_item(conn, listing.player_id, item, listing.quantity, cap).await?;
+        let p = inventory_repo::add_item(conn, listing.player_id, item, listing.quantity, cap)
+            .await?;
+        if p.pending > 0 {
+            note = format!(
+                "<@{}> 📦 Listing Makelar **{} × {}** kedaluwarsa. ⚠️ Inventory penuh — masuk **Pending Claim**!",
+                listing.player_id, item.name, listing.quantity
+            );
+        } else {
+            note = format!(
+                "<@{}> 📦 Listing Makelar **{} × {}** kedaluwarsa dan dikembalikan ke inventory.",
+                listing.player_id, item.name, listing.quantity
+            );
+        }
     }
     market_repo::mark_closed(conn, listing_id, "expired").await?;
-    Ok(())
+    Ok(Some((listing.player_id, note)))
 }
 
 /// Memperbarui harga dinamis NPC dan menyelesaikan listing broker yang target harganya tercapai.
@@ -245,6 +264,14 @@ pub async fn run_market_tick_conn(
     conn: &mut PgConnection,
     fixed_demand_bps: Option<i64>,
 ) -> anyhow::Result<usize> {
+    let notes = run_market_tick_with_notes(conn, fixed_demand_bps).await?;
+    Ok(notes.len())
+}
+
+async fn run_market_tick_with_notes(
+    conn: &mut PgConnection,
+    fixed_demand_bps: Option<i64>,
+) -> anyhow::Result<Vec<(i64, String)>> {
     let rows = market_repo::list_prices(conn).await?;
     let mut rng = StdRng::from_entropy();
     let mut current_prices: HashMap<String, Decimal> = HashMap::new();
@@ -260,7 +287,7 @@ pub async fn run_market_tick_conn(
     }
 
     let active = market_repo::list_all_active(conn).await?;
-    let mut sold_count = 0usize;
+    let mut notes = Vec::new();
     for l in active {
         let Some(&mkt_price) = current_prices.get(&l.item_id) else {
             continue;
@@ -282,23 +309,33 @@ pub async fn run_market_tick_conn(
         let key = format!("broker_sale:{}", locked.id);
         let _ = wallet_repo::apply(conn, locked.player_id, net, &reason, &key).await?;
         market_repo::mark_sold(conn, locked.id, mkt_price, commission).await?;
-        sold_count += 1;
+        let item_name = find_item(&locked.item_id).map(|i| i.name).unwrap_or(&locked.item_id);
+        notes.push((
+            locked.player_id,
+            format!(
+                "<@{}> 💰 Listing Makelar **{} × {}** terjual! Bersih **{}** masuk ke Wallet.",
+                locked.player_id,
+                item_name,
+                locked.quantity,
+                format_bac(net)
+            ),
+        ));
     }
 
-    Ok(sold_count)
+    Ok(notes)
 }
 
 /// Dipanggil oleh scheduler worker untuk `market_tick`. Menjadwalkan tick berikutnya.
 pub async fn handle_market_tick_job(
     conn: &mut PgConnection,
     duration_pct: i64,
-) -> anyhow::Result<()> {
-    let _ = run_market_tick_conn(conn, None).await?;
+) -> anyhow::Result<Vec<(i64, String)>> {
+    let notes = run_market_tick_with_notes(conn, None).await?;
     let secs = (MARKET_TICK_SECS * duration_pct.max(1) / 100).max(5);
     let next_ref = market_repo::next_market_tick_ref(conn).await?;
     scheduler::enqueue(conn, JOB_MARKET_TICK, next_ref, Utc::now() + Duration::seconds(secs))
         .await?;
-    Ok(())
+    Ok(notes)
 }
 
 /// Memastikan ada minimal satu job `market_tick` pending saat bot mulai.

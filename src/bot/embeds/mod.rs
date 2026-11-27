@@ -12,7 +12,7 @@ use crate::domain::economy::format_bac;
 use crate::domain::player::xp_to_next;
 use crate::domain::resources::{find_item, ItemDef};
 use rust_decimal::Decimal;
-use serenity::all::{CreateEmbed, CreateEmbedFooter};
+use serenity::all::{Colour, CreateEmbed, CreateEmbedFooter};
 use std::collections::HashMap;
 
 pub fn help() -> CreateEmbed {
@@ -432,4 +432,18 @@ pub fn crew(crews: &[CrewView], note: Option<String>) -> CreateEmbed {
         e = e.description(n);
     }
     e
+}
+
+pub fn host_panel() -> CreateEmbed {
+    CreateEmbed::new()
+        .title("🎮  Play Urbaniac")
+        .colour(Colour::new(0x2b2d31))
+        .description(
+            "Urbaniac adalah game ekonomi & pembangunan kota yang berjalan langsung di Discord.\n\n\
+             ▶️  Tekan **Play** di bawah untuk membuka **Private Thread** khusus milikmu.\n\
+             💾  Progres, **Bac**, kota, dan item tersimpan otomatis.\n\
+             🏗️  Bangun kota, craft item, dan jual di **Pasar & Makelar**.\n\
+             🔔  Dapatkan **notifikasi langsung** di thread pribadimu saat aktivitas, proyek, atau crafting selesai.",
+        )
+        .image(branding::banner_url())
 }

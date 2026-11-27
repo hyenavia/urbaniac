@@ -130,12 +130,12 @@ pub async fn complete_run(
     conn: &mut PgConnection,
     run_id: i64,
     duration_pct: i64,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<(i64, String)>> {
     let Some(run) = activity_repo::lock_run(conn, run_id).await? else {
-        return Ok(());
+        return Ok(None);
     };
     if run.status != "running" {
-        return Ok(());
+        return Ok(None);
     }
     let kind = ActivityKind::parse(&run.activity)
         .ok_or_else(|| anyhow::anyhow!("aktivitas tidak dikenal: {}", run.activity))?;
@@ -157,8 +157,17 @@ pub async fn complete_run(
     }
     activity_repo::mark_ready(conn, run_id).await?;
 
+    let mut note = format!(
+        "<@{}> 🌾 Aktivitas **{}** selesai! Tekan **Ambil Reward** di menu Aktivitas.",
+        run.player_id,
+        kind.name()
+    );
     if auto_enabled {
-        let _ = claim_one_conn(conn, run.player_id, run_id).await?;
+        let sum = claim_one_conn(conn, run.player_id, run_id).await?;
+        let has_pending = sum
+            .as_ref()
+            .map(|s| s.items.iter().any(|(_, _, p)| *p > 0))
+            .unwrap_or(false);
         let total = slot_total(run.player_id);
         if activity_repo::count_occupied(conn, run.player_id).await? < total {
             let eff_secs =
@@ -168,8 +177,17 @@ pub async fn complete_run(
                 activity_repo::insert_run(conn, run.player_id, kind.as_str(), secs).await?;
             scheduler::enqueue(conn, JOB_ACTIVITY_COMPLETE, new_id, ends_at).await?;
         }
+        if has_pending {
+            note = format!(
+                "<@{}> ⚠️ Aktivitas **{}** selesai (AUTO), tetapi **inventory penuh** — sebagian item masuk **Pending Claim**!",
+                run.player_id,
+                kind.name()
+            );
+        } else {
+            return Ok(None);
+        }
     }
-    Ok(())
+    Ok(Some((run.player_id, note)))
 }
 
 async fn claim_one_conn(

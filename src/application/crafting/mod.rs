@@ -190,15 +190,22 @@ pub async fn start_craft(
 }
 
 /// Dipanggil worker saat durasi crafting habis. Idempoten.
-pub async fn complete_craft(conn: &mut PgConnection, craft_id: i64) -> anyhow::Result<()> {
+pub async fn complete_craft(
+    conn: &mut PgConnection,
+    craft_id: i64,
+) -> anyhow::Result<Option<(i64, String)>> {
     let Some(job) = crafting_repo::lock_craft(conn, craft_id).await? else {
-        return Ok(());
+        return Ok(None);
     };
     if job.status != "running" {
-        return Ok(());
+        return Ok(None);
     }
     let recipe = find_recipe(&job.recipe_id)
         .ok_or_else(|| anyhow::anyhow!("resep tidak dikenal: {}", job.recipe_id))?;
+    let mut note = format!(
+        "<@{}> ⚒️ Crafting **{} × {}** selesai!",
+        job.player_id, recipe.name, job.quantity
+    );
     if let Some(item) = find_item(recipe.output_item_id) {
         if job.auto_sell {
             let unit = market::current_npc_price_conn(conn, item).await?;
@@ -206,13 +213,17 @@ pub async fn complete_craft(conn: &mut PgConnection, craft_id: i64) -> anyhow::R
             let reason = format!("auto_sell_craft:{}x{}", item.id, job.quantity);
             let key = format!("craft_autosell:{}", job.id);
             let _ = wallet_repo::apply(conn, job.player_id, total, &reason, &key).await?;
+            note.push_str(" (otomatis terjual ke NPC)");
         } else {
             let cap = inventory::slot_capacity_conn(conn, job.player_id).await?;
-            inventory_repo::add_item(conn, job.player_id, item, job.quantity, cap).await?;
+            let p = inventory_repo::add_item(conn, job.player_id, item, job.quantity, cap).await?;
+            if p.pending > 0 {
+                note.push_str(" ⚠️ Inventory penuh — masuk **Pending Claim**!");
+            }
         }
     }
     crafting_repo::mark_craft_completed(conn, craft_id).await?;
-    Ok(())
+    Ok(Some((job.player_id, note)))
 }
 
 pub async fn fulfill_order(

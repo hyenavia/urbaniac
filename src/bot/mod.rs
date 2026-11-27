@@ -8,7 +8,7 @@ use crate::config::Config;
 use serenity::all::*;
 use serenity::async_trait;
 use sqlx::PgPool;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::Notify;
 
 pub struct AppState {
@@ -21,12 +21,14 @@ pub struct AppState {
 struct Handler {
     app: AppState,
     guild_id: Option<u64>,
+    http_slot: Arc<OnceLock<Arc<Http>>>,
 }
 
 #[async_trait]
 impl EventHandler for Handler {
     async fn ready(&self, ctx: Context, ready: Ready) {
         tracing::info!(bot = %ready.user.name, "bot terhubung");
+        let _ = self.http_slot.set(ctx.http.clone());
         ctx.set_activity(Some(ActivityData::custom(branding::BOT_STATUS)));
         let defs = commands::definitions();
         let result = match self.guild_id {
@@ -50,9 +52,14 @@ impl EventHandler for Handler {
     }
 }
 
-pub async fn run(cfg: Config, pool: PgPool, notify: Arc<Notify>) -> anyhow::Result<()> {
+pub async fn run(
+    cfg: Config,
+    pool: PgPool,
+    notify: Arc<Notify>,
+    http_slot: Arc<OnceLock<Arc<Http>>>,
+) -> anyhow::Result<()> {
     let app = AppState { pool, notify, activity_duration_pct: cfg.activity_duration_pct };
-    let handler = Handler { app, guild_id: cfg.guild_id };
+    let handler = Handler { app, guild_id: cfg.guild_id, http_slot };
     let mut client = Client::builder(&cfg.discord_token, GatewayIntents::empty())
         .event_handler(handler)
         .await?;

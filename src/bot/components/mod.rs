@@ -296,3 +296,12 @@ pub fn crew_assign_activity(owner: u64, crew_id: i64) -> Vec<CreateActionRow> {
         ]),
     ]
 }
+
+pub fn host_play_button() -> Vec<CreateActionRow> {
+    vec![CreateActionRow::Buttons(vec![
+        CreateButton::new(format!("{PREFIX}:play:0"))
+            .label("Play")
+            .emoji(ReactionType::Unicode("▶️".to_string()))
+            .style(ButtonStyle::Success),
+    ])]
+}
