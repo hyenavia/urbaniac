@@ -1,10 +1,9 @@
 //! Scheduler tunggal + worker ber-batas. Tidak ada timer per aktivitas dan tidak ada polling rapat:
 //! scheduler tidur sampai job berikutnya jatuh tempo (atau dibangunkan lewat Notify).
-use crate::application::{activities, city, crafting, market};
-use crate::infrastructure::repositories::player_repo;
+use crate::application::{activities, city, crafting, market, server};
 use crate::infrastructure::scheduler::{self, DueJob};
 use chrono::Utc;
-use serenity::all::{ChannelId, Http};
+use serenity::all::{Http, UserId};
 use sqlx::PgPool;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -16,18 +15,21 @@ pub const WORKER_CONCURRENCY: usize = 2;
 const MAX_IDLE: Duration = Duration::from_secs(60);
 const ERROR_BACKOFF: Duration = Duration::from_secs(5);
 
-async fn send_notifications(
-    pool: &PgPool,
-    http_slot: &OnceLock<Arc<Http>>,
-    notes: Vec<(i64, String)>,
-) {
+async fn send_notifications(http_slot: &OnceLock<Arc<Http>>, notes: Vec<(i64, String)>) {
     let Some(http) = http_slot.get() else {
         return;
     };
     for (player_id, msg) in notes {
-        let Ok(mut conn) = pool.acquire().await else { continue };
-        if let Ok(Some(tid)) = player_repo::get_thread_id(&mut *conn, player_id).await {
-            let _ = ChannelId::new(tid as u64).say(http, msg).await;
+        let user = UserId::new(player_id as u64);
+        match user.create_dm_channel(http).await {
+            Ok(dm) => {
+                if let Err(e) = dm.say(http, msg).await {
+                    tracing::debug!(player_id, error = ?e, "gagal kirim DM notifikasi");
+                }
+            }
+            Err(e) => {
+                tracing::debug!(player_id, error = ?e, "tidak bisa membuka DM pemain");
+            }
         }
     }
 }
@@ -42,6 +44,7 @@ async fn run_job(
     if !scheduler::lock_pending(&mut *tx, job.id).await? {
         return Ok(());
     }
+    let mut giveaway_result = None;
     let notes = match job.kind.as_str() {
         activities::JOB_ACTIVITY_COMPLETE => {
             activities::complete_run(&mut *tx, job.ref_id, duration_pct)
@@ -54,6 +57,9 @@ async fn run_job(
                 .await?
                 .into_iter()
                 .collect()
+        }
+        city::JOB_CITY_ECONOMY_TICK => {
+            city::handle_city_economy_tick_job(&mut *tx, job.ref_id, duration_pct).await?
         }
         crafting::JOB_CRAFT_COMPLETE => {
             crafting::complete_craft(&mut *tx, job.ref_id)
@@ -70,11 +76,18 @@ async fn run_job(
         market::JOB_MARKET_TICK => {
             market::handle_market_tick_job(&mut *tx, duration_pct).await?
         }
+        server::JOB_GIVEAWAY_END => {
+            giveaway_result = server::finalize_giveaway_conn(&mut *tx, job.ref_id).await?;
+            Vec::new()
+        }
         other => anyhow::bail!("jenis job tidak dikenal: {other}"),
     };
     scheduler::mark_done(&mut *tx, job.id).await?;
     tx.commit().await?;
-    send_notifications(pool, http_slot, notes).await;
+    send_notifications(http_slot, notes).await;
+    if let (Some(res), Some(http)) = (giveaway_result, http_slot.get()) {
+        crate::bot::server_ui::publish_giveaway_result(http, &res).await;
+    }
     Ok(())
 }
 
@@ -135,6 +148,9 @@ pub async fn run_scheduler(
     tracing::info!("scheduler berjalan");
     if let Err(e) = market::ensure_market_tick_scheduled(&pool, duration_pct).await {
         tracing::error!(error = ?e, "gagal menjadwalkan market_tick awal");
+    }
+    if let Err(e) = city::ensure_city_economy_tick_scheduled(&pool, duration_pct).await {
+        tracing::error!(error = ?e, "gagal menjadwalkan city_economy_tick awal");
     }
     loop {
         match process_due_batch_with_pct(&pool, duration_pct, &http_slot).await {

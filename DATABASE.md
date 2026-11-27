@@ -43,3 +43,19 @@ Semua perubahan skema dikelola lewat file migrasi SQLx berurutan di `migrations/
 
 ### `0010_expansion.sql`
 - Seed `npc_market_prices` untuk item baru **Fishing** (`river_fish`, `silver_carp`, `golden_eel`) dan **Mining** (`stone`, `iron_ore`, `amethyst`, `star_crystal`).
+
+### `0011_player_threads.sql`
+- Menambahkan `thread_id BIGINT` pada tabel `players` untuk menyimpan Private Thread per pemain.
+
+### `0012_city_expansion.sql`
+- Menambahkan `target_level INTEGER` pada `city_projects` untuk mendukung upgrade fasilitas multi-level (Lumbung Lv 1–5) dan proyek stage **Desa** hingga **Metropolis**.
+
+### `0013_city_economy.sql`
+- Menambahkan `tax_rate_pct` (0–25%), `welfare` (0–100%), `effectiveness_pct` (50–125%), dan `last_economy_tick` pada tabel `cities`.
+
+### `0014_world_calendar.sql`
+- **`world_calendar`**: kalender global tunggal (`day`, `season`, `active_event`, `trend_item_id`).
+- Menambahkan `local_modifier` pada tabel `cities`.
+
+### `0015_progression_rewards.sql`
+- **`player_progression_rewards`**: pencatatan idempoten klaim reward level pemain (`PK (player_id, reward_key)`).

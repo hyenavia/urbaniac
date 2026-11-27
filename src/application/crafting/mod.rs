@@ -4,6 +4,7 @@ use crate::domain::crafting::{
     MAX_ACTIVE_ORDERS, MAX_CONCURRENT_CRAFTS, RECIPES,
 };
 use crate::domain::economy::npc_buy_price;
+use crate::domain::i18n::{recipe_name, Lang};
 use crate::domain::resources::{find_item, ItemDef};
 use crate::infrastructure::repositories::wallet_repo::{self, ApplyOutcome, WalletError};
 use crate::infrastructure::repositories::{crafting_repo, inventory_repo, player_repo};
@@ -202,10 +203,20 @@ pub async fn complete_craft(
     }
     let recipe = find_recipe(&job.recipe_id)
         .ok_or_else(|| anyhow::anyhow!("resep tidak dikenal: {}", job.recipe_id))?;
-    let mut note = format!(
-        "<@{}> ⚒️ Crafting **{} × {}** selesai!",
-        job.player_id, recipe.name, job.quantity
-    );
+    let lang = player_repo::get_lang(conn, job.player_id)
+        .await
+        .unwrap_or(Lang::En);
+    let r_name = recipe_name(recipe.id, lang);
+    let mut note = match lang {
+        Lang::En => format!(
+            "<@{}> ⚒️ Crafting **{} × {}** completed!",
+            job.player_id, r_name, job.quantity
+        ),
+        Lang::Id => format!(
+            "<@{}> ⚒️ Crafting **{} × {}** selesai!",
+            job.player_id, r_name, job.quantity
+        ),
+    };
     if let Some(item) = find_item(recipe.output_item_id) {
         if job.auto_sell {
             let unit = market::current_npc_price_conn(conn, item).await?;
@@ -213,12 +224,18 @@ pub async fn complete_craft(
             let reason = format!("auto_sell_craft:{}x{}", item.id, job.quantity);
             let key = format!("craft_autosell:{}", job.id);
             let _ = wallet_repo::apply(conn, job.player_id, total, &reason, &key).await?;
-            note.push_str(" (otomatis terjual ke NPC)");
+            match lang {
+                Lang::En => note.push_str(" (automatically sold to NPC)"),
+                Lang::Id => note.push_str(" (otomatis terjual ke NPC)"),
+            }
         } else {
             let cap = inventory::slot_capacity_conn(conn, job.player_id).await?;
             let p = inventory_repo::add_item(conn, job.player_id, item, job.quantity, cap).await?;
             if p.pending > 0 {
-                note.push_str(" ⚠️ Inventory penuh — masuk **Pending Claim**!");
+                match lang {
+                    Lang::En => note.push_str(" ⚠️ Inventory full — moved to **Pending Claim**!"),
+                    Lang::Id => note.push_str(" ⚠️ Inventory penuh — masuk **Pending Claim**!"),
+                }
             }
         }
     }

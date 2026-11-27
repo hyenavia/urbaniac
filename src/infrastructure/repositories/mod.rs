@@ -5,4 +5,6 @@ pub mod crew_repo;
 pub mod inventory_repo;
 pub mod market_repo;
 pub mod player_repo;
+pub mod server_repo;
 pub mod wallet_repo;
+pub mod world_repo;

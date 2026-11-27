@@ -102,7 +102,7 @@ Untuk tiap fase, buat bagian rinci seperti Milestone 1-3 (isi, syarat keluar, uj
 sebelum mulai mengerjakannya.
 
 ### Milestone 4 (Fase 2) — Pasar & Makelar
-**Status:** kode ditulis, siap diuji di host PostgreSQL & bot Discord.
+**Status:** terverifikasi di host PostgreSQL & bot Discord.
 
 Isi:
 - [x] Migrasi `0007_market.sql`: `npc_market_prices` (harga dinamis & multiplier permintaan per item) dan `broker_listings` (item, qty, harga target/minimum, fee, komisi, status, `expires_at`)
@@ -113,16 +113,16 @@ Isi:
 - [x] UI Discord: tombol **Pasar & Makelar** (lihat harga pasar dinamis, buat listing broker dengan pilihan item/harga/durasi, lihat & batalkan listing aktif)
 
 Syarat keluar:
-- [~] `cargo check`, `cargo test --lib` lolos (`cargo test` `tests/stage4.rs` dijalankan di host PostgreSQL)
-- [ ] Harga NPC Market berubah dinamis saat market tick / transaksi
-- [ ] Buat listing broker: item berkurang dari inventory, fee listing terpotong di `ledger_entries`; ditolak tanpa mutasi jika Bac/item kurang
-- [ ] Listing terjual lewat permintaan NPC saat harga pasar >= harga target/minimum; Bac bersih (harga jual - komisi) masuk Wallet & tercatat di ledger
-- [ ] Listing kedaluwarsa diproses scheduler setelah durasi habis (atau restart bot): item kembali ke inventory / Pending Claim
+- [x] `cargo check`, `cargo test --lib`, `cargo test` (`tests/stage4.rs`) lolos
+- [x] Harga NPC Market berubah dinamis saat market tick / transaksi
+- [x] Buat listing broker: item berkurang dari inventory, fee listing terpotong di `ledger_entries`; ditolak tanpa mutasi jika Bac/item kurang
+- [x] Listing terjual lewat permintaan NPC saat harga pasar >= harga target/minimum; Bac bersih (harga jual - komisi) masuk Wallet & tercatat di ledger
+- [x] Listing kedaluwarsa diproses scheduler setelah durasi habis (atau restart bot): item kembali ke inventory / Pending Claim
 
 Uji manual: buka Pasar & Makelar -> cek harga dinamis -> jual langsung ke NPC -> buat listing broker -> tunggu tick/kedaluwarsa -> cek saldo & ledger.
 
 ### Milestone 5 (Fase 3) — Crafting & Pesanan
-**Status:** kode ditulis, siap diuji di host PostgreSQL & bot Discord.
+**Status:** terverifikasi di host PostgreSQL & bot Discord.
 
 Isi:
 - [x] Migrasi `0008_crafting_orders.sql`: `crafting_jobs` (antrean crafting lewat scheduler), `npc_orders` (pesanan NPC aktif & selesai), `shop_reputation` (reputasi toko & XP)
@@ -132,7 +132,7 @@ Isi:
 - [x] UI Discord & `tests/stage5.rs`
 
 ### Milestone 6 (Fase 4) — Kru & Automasi
-**Status:** kode ditulis, siap diuji di host PostgreSQL & bot Discord.
+**Status:** terverifikasi di host PostgreSQL & bot Discord.
 
 Isi:
 - [x] Migrasi `0009_crew.sql`: `player_crews` (kru rekrutan, rarity, spesialisasi, level, `assigned_activity`, `auto_enabled`)
@@ -141,9 +141,47 @@ Isi:
 - [x] UI Discord & `tests/stage6.rs`
 
 ### Milestone 7 (Fase 5) — Activity & Resource Expansion
-**Status:** kode ditulis, siap diuji di host PostgreSQL & bot Discord.
+**Status:** terverifikasi di host PostgreSQL & bot Discord.
 
 Isi:
 - [x] Migrasi `0010_expansion.sql`: seed harga `npc_market_prices` untuk item baru Fishing & Mining
 - [x] Aktivitas baru: **Fishing** (terbuka di stage **Desa**) dan **Mining** (terbuka di stage **Kota Kecil**) + item rarity lebih tinggi (Rare/Epic)
 - [x] UI Discord (tombol Fishing/Mining di menu Aktivitas) & `tests/stage7.rs`
+
+### Milestone 8 (Fase 6) — City Development & Embed Design System
+**Status:** kode ditulis, siap diuji di host PostgreSQL & bot Discord.
+
+Isi:
+- [x] Migrasi `0012_city_expansion.sql`: upgrade Lumbung hingga Lv 5 (+4 slot/level) dan proyek kenaikan stage **Desa -> Kota Kecil -> Kota Dagang -> Metropolis**
+- [x] Perbaikan & fitur UI: optimasi `Jual Semua`, tombol **Jual Custom** (Modal input), notifikasi scheduler via **DM**, **Panduan** alur bermain, dan rekreasi seluruh embed sesuai **Urbaniac Discord Embed Design System**
+- [x] `tests/stage8.rs`
+
+Syarat keluar:
+- [~] `cargo check`, `cargo test --lib` lolos (`cargo test` `tests/stage8.rs` dijalankan di host PostgreSQL)
+- [ ] Jual Semua & Jual Custom berfungsi di Discord, notifikasi masuk ke DM, dan proyek kota naik hingga Metropolis
+
+### Milestone 9 (Fase 7) — City Economy & Management
+**Status:** kode ditulis, siap diuji di host PostgreSQL & bot Discord.
+
+Isi:
+- [x] Migrasi `0013_city_economy.sql`: `tax_rate_pct`, `welfare`, `effectiveness_pct` pada `cities`
+- [x] Domain `domain/city`: Citizen Tax otomatis, maintenance fasilitas, gaji kru, tanpa saldo negatif dan tanpa denda (Treasury kosong menurunkan welfare & efektivitas bertahap)
+- [x] Scheduler job `city_economy_tick`, kontrol tarif pajak di menu **Kota** (`5%` / `10%` / `15%`), dan dampak efektivitas kota pada yield aktivitas
+- [x] `tests/stage9.rs`
+
+### Milestone 10 (Fase 8) — Advanced Economy
+**Status:** kode ditulis, siap diuji di host PostgreSQL & bot Discord.
+
+Isi:
+- [x] Migrasi `0014_world_calendar.sql`: `world_calendar` (hari, musim, event aktif, item tren) & `local_modifier` kota
+- [x] Domain `domain/world`: rotasi musim (`Spring/Summer/Autumn/Winter`), event dunia, dan modifier harga pasar
+- [x] Integrasi kalender global ke `application/market` & tampilan UI **Pasar & Makelar**
+- [x] `tests/stage10.rs`
+
+### Milestone 11 (Fase 9) — Advanced Progression
+**Status:** kode ditulis, siap diuji di host PostgreSQL & bot Discord.
+
+Isi:
+- [x] Migrasi `0015_progression_rewards.sql`: tabel klaim idempoten reward progresi pemain
+- [x] Domain `domain/progression` & `activities::flush_overflow_for_stage_conn`: XP overflow langsung diterapkan lintas stage saat stage kota naik, plus bonus Bac otomatis di Level 5, 10, 15, 25
+- [x] `tests/stage11.rs`

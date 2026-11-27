@@ -50,6 +50,47 @@ pub fn apply_xp(mut s: XpState, gain: i64, cap: i32) -> XpState {
     s
 }
 
+#[derive(Debug)]
+pub struct ProgressionReward {
+    pub key: &'static str,
+    pub min_player_level: i32,
+    pub bac_cents: i64,
+    pub title: &'static str,
+}
+
+pub const PROGRESSION_REWARDS: &[ProgressionReward] = &[
+    ProgressionReward {
+        key: "player_lv_5",
+        min_player_level: 5,
+        bac_cents: 10_000,
+        title: "Warga Teladan (Lv 5)",
+    },
+    ProgressionReward {
+        key: "player_lv_10",
+        min_player_level: 10,
+        bac_cents: 25_000,
+        title: "Penggerak Kota (Lv 10)",
+    },
+    ProgressionReward {
+        key: "player_lv_15",
+        min_player_level: 15,
+        bac_cents: 40_000,
+        title: "Tokoh Niaga (Lv 15)",
+    },
+    ProgressionReward {
+        key: "player_lv_25",
+        min_player_level: 25,
+        bac_cents: 80_000,
+        title: "Arsitek Metropolis (Lv 25)",
+    },
+];
+
+pub fn eligible_rewards(player_level: i32) -> impl Iterator<Item = &'static ProgressionReward> {
+    PROGRESSION_REWARDS
+        .iter()
+        .filter(move |r| player_level >= r.min_player_level)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,5 +124,22 @@ mod tests {
     #[test]
     fn caps_increase_with_stage() {
         assert!(activity_level_cap(CityStage::Desa) > activity_level_cap(CityStage::Kampung));
+    }
+
+    #[test]
+    fn overflow_cascades_across_multiple_stage_caps() {
+        // Kampung cap = 10; L9 butuh 900, L10..19 butuh besar -> beri 5000 XP
+        let s = apply_xp(XpState { level: 9, xp: 0, overflow: 0 }, 5_000, activity_level_cap(CityStage::Kampung));
+        assert_eq!(s.level, 10);
+        assert_eq!(s.overflow, 4_100);
+
+        // Naik ke Desa (cap 20): overflow otomatis naikkan level
+        let s2 = apply_xp(s, 0, activity_level_cap(CityStage::Desa));
+        assert!(s2.level > 10 && s2.level <= 20);
+        assert_eq!(s2.overflow, 0);
+
+        // Reward milestone cek
+        let keys: Vec<_> = eligible_rewards(10).map(|r| r.key).collect();
+        assert_eq!(keys, vec!["player_lv_5", "player_lv_10"]);
     }
 }

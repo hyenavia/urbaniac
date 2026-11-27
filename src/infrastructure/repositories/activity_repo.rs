@@ -150,3 +150,12 @@ pub async fn save_progress(
     .await?;
     Ok(())
 }
+
+pub async fn list_player_activities(conn: &mut PgConnection, player_id: i64) -> sqlx::Result<Vec<String>> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT activity FROM player_activities WHERE player_id = $1 ORDER BY activity",
+    )
+    .bind(player_id)
+    .fetch_all(&mut *conn)
+    .await
+}

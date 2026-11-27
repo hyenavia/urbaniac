@@ -13,10 +13,11 @@ pub async fn run(ctx: &Context, cmd: &CommandInteraction, app: &AppState) -> any
         .await?
         .ok_or_else(|| anyhow::anyhow!("profil hilang setelah registrasi"))?;
 
+    let lang = profile.player.language();
     let msg = CreateInteractionResponseMessage::new()
-        .embed(embeds::welcome(&profile, created))
+        .embed(embeds::welcome(&profile, created, lang))
         .add_file(crate::bot::branding::banner_attachment())
-        .components(components::main_menu(user.id.get()))
+        .components(components::main_menu(user.id.get(), lang))
         .ephemeral(true);
     cmd.create_response(&ctx.http, CreateInteractionResponse::Message(msg)).await?;
     Ok(())

@@ -1,5 +1,6 @@
 use crate::application::{economy, inventory};
 use crate::domain::economy::starter_bac;
+use crate::domain::i18n::Lang;
 use crate::domain::player::Player;
 use crate::infrastructure::repositories::{city_repo, player_repo, wallet_repo};
 use anyhow::anyhow;
@@ -73,4 +74,23 @@ pub async fn set_thread_id(pool: &PgPool, id: i64, thread_id: u64) -> anyhow::Re
     let mut conn = pool.acquire().await?;
     player_repo::set_thread_id(&mut *conn, id, thread_id as i64).await?;
     Ok(())
+}
+
+pub async fn get_lang(pool: &PgPool, id: i64) -> anyhow::Result<Lang> {
+    let mut conn = pool.acquire().await?;
+    Ok(player_repo::get_lang(&mut *conn, id).await?)
+}
+
+pub async fn set_lang(pool: &PgPool, id: i64, lang: Lang) -> anyhow::Result<()> {
+    let mut conn = pool.acquire().await?;
+    player_repo::set_lang(&mut *conn, id, lang).await?;
+    Ok(())
+}
+
+pub async fn toggle_lang(pool: &PgPool, id: i64) -> anyhow::Result<Lang> {
+    let mut tx = pool.begin().await?;
+    let next = player_repo::get_lang(&mut *tx, id).await?.toggle();
+    player_repo::set_lang(&mut *tx, id, next).await?;
+    tx.commit().await?;
+    Ok(next)
 }

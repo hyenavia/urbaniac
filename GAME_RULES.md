@@ -17,8 +17,12 @@ Semua angka di bawah adalah nilai awal sementara (spesifikasi tidak menentukanny
 | Level cap aktivitas | Kampung 10, Desa 20, Kota Kecil 30, Kota Dagang 40, Metropolis 50 | `domain/progression::activity_level_cap` |
 | Harga NPC (Bac/unit) | Gandum 3, Kentang 4, Kayu 3, Buah Hutan 3.5, Herba Liar 12 | `domain/resources::ITEMS` |
 | Proyek Sumur | 50 Bac + Kayu x10, 5 menit | `domain/city::WELL` |
-| Proyek Lumbung | 80 Bac + Kayu x15 + Gandum x10, 8 menit (+4 slot inventory) | `domain/city::GRANARY` |
+| Proyek Lumbung (Lv 1–5) | 80×Lv Bac + Kayu 15×Lv + Gandum 10×Lv, 8 menit (+4 slot/Lv) | `domain/city::GRANARY` |
 | Proyek Balai Kampung | 150 Bac + Kayu x25 + Kentang x10, 10 menit (naik ke Desa; butuh Sumur & Lumbung) | `domain/city::TOWN_HALL` |
+| Proyek Pasar Desa | 200 Bac + Papan x10 + Roti x5, 10 menit (Desa) | `domain/city::MARKET_HALL` |
+| Proyek Balai Kota Kecil | 350 Bac + Peti x5 + Ikan Sungai x10, 15 menit (naik ke Kota Kecil) | `domain/city::CITY_HALL` |
+| Proyek Pelabuhan Dagang | 600 Bac + Papan x20 + Bijih Besi x10, 20 menit (naik ke Kota Dagang) | `domain/city::TRADE_PORT` |
+| Proyek Menara Metropolis | 1200 Bac + Kecubung x5 + Tonik Herba x5, 30 menit (naik ke Metropolis) | `domain/city::METROPOLIS_TOWER` |
 
 Aturan inventory: satu jenis item memakai satu slot dan menumpuk sampai stack limit.
 Item yang tidak muat (stack penuh atau tidak ada slot baru) masuk Pending Claim dan
@@ -43,7 +47,12 @@ Setiap pemain memulai dengan kota berstatus **Kampung** dan City Treasury `0.00 
 Hanya satu proyek kota yang dapat berjalan pada satu waktu, dan diselesaikan otomatis oleh scheduler persisten.
 
 ## Jual ke NPC & Pasar Makelar
-- **NPC Market (dinamis):** harga beli NPC bergerak dalam rentang `0.70x` sampai `1.50x` dari harga dasar berdasarkan pembaruan berkala (`market_tick` tiap 15 menit, diskalakan `ACTIVITY_DURATION_PCT`) dan volume penjualan pemain (`domain/market`).
+- **NPC Market (dinamis) & Kalender Global:** harga beli NPC bergerak dari multiplier pasar (`0.70x`–`1.50x`) dikalikan modifier **Kalender Global** (`Musim`, `Event Dunia`, dan `Tren Item` di `domain/world`).
 - **Makelar / Broker:** tanpa trading langsung antar pemain. Pemain dapat menitipkan maksimal 5 listing aktif dengan pilihan target harga (+10% / +25% / +40%) dan durasi (1 / 6 / 24 jam).
   - **Fee listing:** 2% dari total nilai target (minimal `1.00 Bac`), dibayar di muka dan tidak dikembalikan jika batal/kedaluwarsa.
   - **Komisi penjualan:** 5% dari harga jual kotor saat permintaan NPC menyentuh harga target; hasil bersih masuk Wallet dan tercatat di `ledger_entries`.
+
+## Ekonomi Kota (Pajak, Maintenance, Welfare) & Reward Progresi
+- **Siklus Ekonomi Kota:** scheduler (`city_economy_tick` tiap 30 menit, diskalakan `ACTIVITY_DURATION_PCT`) memungut **Citizen Tax** ke City Treasury lalu membayar maintenance fasilitas (`5 Bac/fasilitas`) & gaji kru (`8 Bac/kru`).
+- **Tanpa saldo negatif & tanpa denda:** jika Treasury kosong, Treasury tetap `0.00 Bac`, namun **Welfare** dan **Efektivitas** turun bertahap (mengurangi bonus yield aktivitas).
+- **Reward Progresi:** pemain mendapat bonus Bac otomatis & idempoten saat mencapai Level 5 (`100 Bac`), 10 (`250 Bac`), 15 (`400 Bac`), dan 25 (`800 Bac`), dan XP overflow aktivitas langsung diterapkan saat stage kota naik.

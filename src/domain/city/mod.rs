@@ -40,16 +40,40 @@ impl CityStage {
             CityStage::Metropolis => "Metropolis",
         }
     }
+
+    pub fn era(&self) -> &'static str {
+        match self {
+            CityStage::Kampung | CityStage::Desa => "Village Era",
+            CityStage::KotaKecil => "Town Era",
+            CityStage::KotaDagang => "City Era",
+            CityStage::Metropolis => "Metropolis Era",
+        }
+    }
+
+    pub fn next(&self) -> Option<Self> {
+        match self {
+            CityStage::Kampung => Some(CityStage::Desa),
+            CityStage::Desa => Some(CityStage::KotaKecil),
+            CityStage::KotaKecil => Some(CityStage::KotaDagang),
+            CityStage::KotaDagang => Some(CityStage::Metropolis),
+            CityStage::Metropolis => None,
+        }
+    }
 }
 
 /// Tambahan slot inventory per level Lumbung. Nilai awal sementara.
 pub const GRANARY_SLOTS_PER_LEVEL: i64 = 4;
+pub const MAX_GRANARY_LEVEL: i32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectId {
     Well,
     Granary,
     TownHall,
+    MarketHall,
+    CityHall,
+    TradePort,
+    MetropolisTower,
 }
 
 #[derive(Debug)]
@@ -58,7 +82,9 @@ pub struct ProjectDef {
     pub key: &'static str,
     pub name: &'static str,
     pub description: &'static str,
-    /// Biaya Bac dalam sen (5000 = 50.00 Bac).
+    pub min_stage: CityStage,
+    pub max_level: i32,
+    /// Biaya Bac dasar dalam sen (5000 = 50.00 Bac).
     pub cost_bac_cents: i64,
     /// Resource yang dibutuhkan: (item_id, jumlah).
     pub cost_items: &'static [(&'static str, i64)],
@@ -66,13 +92,25 @@ pub struct ProjectDef {
 }
 
 impl ProjectId {
-    pub const ALL: [ProjectId; 3] = [ProjectId::Well, ProjectId::Granary, ProjectId::TownHall];
+    pub const ALL: [ProjectId; 7] = [
+        ProjectId::Well,
+        ProjectId::Granary,
+        ProjectId::TownHall,
+        ProjectId::MarketHall,
+        ProjectId::CityHall,
+        ProjectId::TradePort,
+        ProjectId::MetropolisTower,
+    ];
 
     pub fn as_str(&self) -> &'static str {
         match self {
             ProjectId::Well => "well",
             ProjectId::Granary => "granary",
             ProjectId::TownHall => "town_hall",
+            ProjectId::MarketHall => "market_hall",
+            ProjectId::CityHall => "city_hall",
+            ProjectId::TradePort => "trade_port",
+            ProjectId::MetropolisTower => "metropolis_tower",
         }
     }
 
@@ -81,6 +119,10 @@ impl ProjectId {
             "well" => Some(ProjectId::Well),
             "granary" => Some(ProjectId::Granary),
             "town_hall" => Some(ProjectId::TownHall),
+            "market_hall" => Some(ProjectId::MarketHall),
+            "city_hall" => Some(ProjectId::CityHall),
+            "trade_port" => Some(ProjectId::TradePort),
+            "metropolis_tower" => Some(ProjectId::MetropolisTower),
             _ => None,
         }
     }
@@ -95,6 +137,8 @@ pub const WELL: ProjectDef = ProjectDef {
     key: "well",
     name: "Sumur",
     description: "Sumber air bersih Kampung. Prasyarat Balai Kampung.",
+    min_stage: CityStage::Kampung,
+    max_level: 1,
     cost_bac_cents: 5_000,
     cost_items: &[("wood", 10)],
     duration_secs: 300,
@@ -104,7 +148,9 @@ pub const GRANARY: ProjectDef = ProjectDef {
     id: ProjectId::Granary,
     key: "granary",
     name: "Lumbung",
-    description: "Menambah +4 slot kapasitas inventory.",
+    description: "Menambah +4 slot kapasitas inventory per level (maks Lv 5).",
+    min_stage: CityStage::Kampung,
+    max_level: MAX_GRANARY_LEVEL,
     cost_bac_cents: 8_000,
     cost_items: &[("wood", 15), ("wheat", 10)],
     duration_secs: 480,
@@ -114,10 +160,60 @@ pub const TOWN_HALL: ProjectDef = ProjectDef {
     id: ProjectId::TownHall,
     key: "town_hall",
     name: "Balai Kampung",
-    description: "Menaikkan stage kota dari Kampung menjadi Desa (butuh Sumur & Lumbung).",
+    description: "Naikkan kota ke Desa (buka Fishing & cap Lv 20; butuh Sumur & Lumbung).",
+    min_stage: CityStage::Kampung,
+    max_level: 1,
     cost_bac_cents: 15_000,
     cost_items: &[("wood", 25), ("potato", 10)],
     duration_secs: 600,
+};
+
+pub const MARKET_HALL: ProjectDef = ProjectDef {
+    id: ProjectId::MarketHall,
+    key: "market_hall",
+    name: "Pasar Desa",
+    description: "Pusat niaga Desa. Prasyarat Balai Kota Kecil.",
+    min_stage: CityStage::Desa,
+    max_level: 1,
+    cost_bac_cents: 20_000,
+    cost_items: &[("plank", 10), ("bread", 5)],
+    duration_secs: 600,
+};
+
+pub const CITY_HALL: ProjectDef = ProjectDef {
+    id: ProjectId::CityHall,
+    key: "city_hall",
+    name: "Balai Kota Kecil",
+    description: "Naikkan kota ke Kota Kecil (buka Mining & cap Lv 30; butuh Pasar Desa).",
+    min_stage: CityStage::Desa,
+    max_level: 1,
+    cost_bac_cents: 35_000,
+    cost_items: &[("wooden_crate", 5), ("river_fish", 10)],
+    duration_secs: 900,
+};
+
+pub const TRADE_PORT: ProjectDef = ProjectDef {
+    id: ProjectId::TradePort,
+    key: "trade_port",
+    name: "Pelabuhan Dagang",
+    description: "Naikkan kota ke Kota Dagang (cap aktivitas Lv 40).",
+    min_stage: CityStage::KotaKecil,
+    max_level: 1,
+    cost_bac_cents: 60_000,
+    cost_items: &[("plank", 20), ("iron_ore", 10)],
+    duration_secs: 1200,
+};
+
+pub const METROPOLIS_TOWER: ProjectDef = ProjectDef {
+    id: ProjectId::MetropolisTower,
+    key: "metropolis_tower",
+    name: "Menara Metropolis",
+    description: "Naikkan kota ke Metropolis (cap aktivitas Lv 50).",
+    min_stage: CityStage::KotaDagang,
+    max_level: 1,
+    cost_bac_cents: 120_000,
+    cost_items: &[("amethyst", 5), ("healing_tonic", 5)],
+    duration_secs: 1800,
 };
 
 pub fn def(id: ProjectId) -> &'static ProjectDef {
@@ -125,15 +221,126 @@ pub fn def(id: ProjectId) -> &'static ProjectDef {
         ProjectId::Well => &WELL,
         ProjectId::Granary => &GRANARY,
         ProjectId::TownHall => &TOWN_HALL,
+        ProjectId::MarketHall => &MARKET_HALL,
+        ProjectId::CityHall => &CITY_HALL,
+        ProjectId::TradePort => &TRADE_PORT,
+        ProjectId::MetropolisTower => &METROPOLIS_TOWER,
     }
 }
 
+pub fn project_cost_bac_for_level(p: &ProjectDef, next_level: i32) -> Decimal {
+    Decimal::new(p.cost_bac_cents * (next_level.max(1) as i64), 2)
+}
+
 pub fn project_cost_bac(p: &ProjectDef) -> Decimal {
-    Decimal::new(p.cost_bac_cents, 2)
+    project_cost_bac_for_level(p, 1)
 }
 
 pub fn inventory_capacity_with_granary(base: i64, granary_level: i32) -> i64 {
     base + (granary_level.max(0) as i64) * GRANARY_SLOTS_PER_LEVEL
+}
+
+pub const CITY_ECONOMY_TICK_SECS: i64 = 1800; // 30 menit (diskalakan ACTIVITY_DURATION_PCT)
+pub const MIN_TAX_RATE: i32 = 0;
+pub const MAX_TAX_RATE: i32 = 25;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CityEconomyOutcome {
+    pub tax_income: Decimal,
+    pub maintenance: Decimal,
+    pub crew_salary: Decimal,
+    pub treasury_delta: Decimal,
+    pub new_treasury: Decimal,
+    pub new_welfare: i32,
+    pub new_effectiveness_pct: i32,
+    pub shortfall: bool,
+}
+
+pub fn effectiveness_from_welfare(welfare: i32) -> i32 {
+    50 + (welfare.clamp(0, 100) * 65 / 100)
+}
+
+pub fn local_modifier_from_city(stage: CityStage, welfare: i32) -> Decimal {
+    let base = match stage {
+        CityStage::Kampung => Decimal::new(10_000, 4),
+        CityStage::Desa => Decimal::new(10_200, 4),
+        CityStage::KotaKecil => Decimal::new(10_500, 4),
+        CityStage::KotaDagang => Decimal::new(11_000, 4),
+        CityStage::Metropolis => Decimal::new(11_500, 4),
+    };
+    let penalty = if welfare < 40 {
+        Decimal::new(500, 4)
+    } else {
+        Decimal::ZERO
+    };
+    (base - penalty)
+        .round_dp(4)
+        .clamp(Decimal::new(8_000, 4), Decimal::new(13_000, 4))
+}
+
+/// Menghitung satu siklus pajak warga, maintenance fasilitas, gaji kru, dan welfare.
+/// Treasury tidak pernah negatif dan tidak ada denda; kekurangan hanya menurunkan welfare & efektivitas bertahap.
+pub fn settle_city_economy_tick(
+    treasury: Decimal,
+    stage: CityStage,
+    facility_count: i64,
+    crew_count: i64,
+    tax_rate_pct: i32,
+    welfare: i32,
+) -> CityEconomyOutcome {
+    let stage_base = match stage {
+        CityStage::Kampung => Decimal::new(1_500, 2),
+        CityStage::Desa => Decimal::new(3_500, 2),
+        CityStage::KotaKecil => Decimal::new(7_500, 2),
+        CityStage::KotaDagang => Decimal::new(14_000, 2),
+        CityStage::Metropolis => Decimal::new(26_000, 2),
+    };
+    let base_tax = stage_base + Decimal::new(500 * facility_count.max(0), 2);
+    let tax_pct = tax_rate_pct.clamp(MIN_TAX_RATE, MAX_TAX_RATE);
+    let tax_income = (base_tax * Decimal::from(tax_pct) / Decimal::from(10)
+        * Decimal::from(welfare.clamp(20, 100))
+        / Decimal::from(100))
+    .round_dp(2);
+
+    let maintenance = Decimal::new(500 * facility_count.max(0), 2);
+    let crew_salary = Decimal::new(800 * crew_count.max(0), 2);
+    let available = (treasury + tax_income).round_dp(2);
+    let expense = maintenance + crew_salary;
+    let mood = if tax_pct > 15 {
+        -3
+    } else if tax_pct <= 10 {
+        3
+    } else {
+        0
+    };
+
+    let (new_treasury, shortfall, new_welfare) = if available >= expense {
+        (
+            (available - expense).round_dp(2),
+            false,
+            (welfare + 5 + mood).clamp(0, 100),
+        )
+    } else {
+        (
+            Decimal::ZERO,
+            true,
+            (welfare - 10 + mood).clamp(0, 100),
+        )
+    };
+
+    let treasury_delta = (new_treasury - treasury).round_dp(2);
+    let new_effectiveness_pct = effectiveness_from_welfare(new_welfare);
+
+    CityEconomyOutcome {
+        tax_income,
+        maintenance,
+        crew_salary,
+        treasury_delta,
+        new_treasury,
+        new_welfare,
+        new_effectiveness_pct,
+        shortfall,
+    }
 }
 
 #[cfg(test)]
@@ -170,6 +377,35 @@ mod tests {
     fn granary_increases_inventory_capacity() {
         assert_eq!(inventory_capacity_with_granary(BASE_SLOT_CAPACITY, 0), 12);
         assert_eq!(inventory_capacity_with_granary(BASE_SLOT_CAPACITY, 1), 16);
-        assert_eq!(inventory_capacity_with_granary(BASE_SLOT_CAPACITY, 2), 20);
+        assert_eq!(inventory_capacity_with_granary(BASE_SLOT_CAPACITY, 5), 32);
+    }
+
+    #[test]
+    fn city_economy_never_negative_and_low_treasury_reduces_welfare() {
+        let ok = settle_city_economy_tick(
+            Decimal::new(10_000, 2),
+            CityStage::Desa,
+            2,
+            1,
+            10,
+            80,
+        );
+        assert!(!ok.shortfall);
+        assert!(ok.new_treasury >= Decimal::ZERO);
+        assert!(ok.new_welfare > 80);
+
+        // Treasury 0 dengan pajak 0% dan beban biaya -> tidak negatif, welfare turun bertahap
+        let empty = settle_city_economy_tick(
+            Decimal::ZERO,
+            CityStage::Kampung,
+            3,
+            2,
+            0,
+            70,
+        );
+        assert!(empty.shortfall);
+        assert_eq!(empty.new_treasury, Decimal::ZERO);
+        assert!(empty.new_welfare < 70);
+        assert!(empty.new_effectiveness_pct < effectiveness_from_welfare(70));
     }
 }

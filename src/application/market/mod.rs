@@ -1,12 +1,14 @@
 use crate::application::inventory;
 use crate::domain::economy::{format_bac, npc_buy_price};
+use crate::domain::i18n::{item_name, Lang};
 use crate::domain::market::{
     calc_listing_fee, calc_sale_settlement, dynamic_price, next_multiplier, ListingDuration,
     MARKET_TICK_SECS, MAX_ACTIVE_LISTINGS,
 };
-use crate::domain::resources::{find_item, ItemDef};
+use crate::domain::resources::{find_item, ItemDef, ITEMS};
+use crate::domain::world::{advance_calendar_day, world_price_multiplier, Season, WorldEvent};
 use crate::infrastructure::repositories::wallet_repo::{self, ApplyOutcome, WalletError};
-use crate::infrastructure::repositories::{inventory_repo, market_repo, player_repo};
+use crate::infrastructure::repositories::{inventory_repo, market_repo, player_repo, world_repo};
 use crate::infrastructure::scheduler;
 use chrono::{DateTime, Duration, Utc};
 use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -57,10 +59,32 @@ pub struct BrokerListingView {
     pub expires_at: DateTime<Utc>,
 }
 
+pub struct CalendarView {
+    pub day: i32,
+    pub season: Season,
+    pub active_event: Option<WorldEvent>,
+    pub trend_item_id: Option<&'static str>,
+    pub trend_item_name: Option<&'static str>,
+}
+
 pub struct MarketOverview {
     pub prices: Vec<MarketPriceView>,
     pub listings: Vec<BrokerListingView>,
     pub wallet_balance: Decimal,
+    pub calendar: CalendarView,
+}
+
+fn to_calendar_view(row: &world_repo::CalendarRow) -> CalendarView {
+    let season = Season::parse(&row.season).unwrap_or(Season::Spring);
+    let active_event = row.active_event.as_deref().and_then(WorldEvent::parse);
+    let trend_item = row.trend_item_id.as_deref().and_then(find_item);
+    CalendarView {
+        day: row.day,
+        season,
+        active_event,
+        trend_item_id: trend_item.map(|i| i.id),
+        trend_item_name: trend_item.map(|i| i.name),
+    }
 }
 
 pub async fn current_npc_price_conn(
@@ -68,7 +92,12 @@ pub async fn current_npc_price_conn(
     item: &ItemDef,
 ) -> sqlx::Result<Decimal> {
     let mult = market_repo::get_multiplier(conn, item.id).await?;
-    Ok(dynamic_price(npc_buy_price(item), mult))
+    let cal = world_repo::get_calendar(conn).await?;
+    let season = Season::parse(&cal.season).unwrap_or(Season::Spring);
+    let event = cal.active_event.as_deref().and_then(WorldEvent::parse);
+    let world_mult = world_price_multiplier(season, event, cal.trend_item_id.as_deref(), item.id);
+    let combined = (mult * world_mult).round_dp(4);
+    Ok(dynamic_price(npc_buy_price(item), combined))
 }
 
 pub async fn current_npc_price(pool: &PgPool, item: &ItemDef) -> anyhow::Result<Decimal> {
@@ -78,18 +107,27 @@ pub async fn current_npc_price(pool: &PgPool, item: &ItemDef) -> anyhow::Result<
 
 pub async fn overview(pool: &PgPool, player_id: i64) -> anyhow::Result<MarketOverview> {
     let mut conn = pool.acquire().await?;
+    let cal_row = world_repo::get_calendar(&mut *conn).await?;
+    let calendar = to_calendar_view(&cal_row);
     let rows = market_repo::list_prices(&mut *conn).await?;
     let prices = rows
         .into_iter()
         .filter_map(|r| {
             let item = find_item(&r.item_id)?;
             let base = npc_buy_price(item);
-            let current = dynamic_price(base, r.multiplier);
+            let world_mult = world_price_multiplier(
+                calendar.season,
+                calendar.active_event,
+                cal_row.trend_item_id.as_deref(),
+                item.id,
+            );
+            let total_mult = (r.multiplier * world_mult).round_dp(4);
+            let current = dynamic_price(base, total_mult);
             Some(MarketPriceView {
                 item,
                 base_price: base,
                 current_price: current,
-                multiplier: r.multiplier,
+                multiplier: total_mult,
             })
         })
         .collect();
@@ -118,6 +156,7 @@ pub async fn overview(pool: &PgPool, player_id: i64) -> anyhow::Result<MarketOve
         prices,
         listings,
         wallet_balance,
+        calendar,
     })
 }
 
@@ -234,25 +273,47 @@ pub async fn expire_listing(
     if listing.status != "active" {
         return Ok(None);
     }
-    let mut note = format!(
-        "<@{}> 📦 Listing Makelar #{} kedaluwarsa.",
-        listing.player_id, listing.id
-    );
+    let lang = player_repo::get_lang(conn, listing.player_id)
+        .await
+        .unwrap_or(Lang::En);
+    let mut note = match lang {
+        Lang::En => format!(
+            "<@{}> 📦 Broker Listing #{} expired.",
+            listing.player_id, listing.id
+        ),
+        Lang::Id => format!(
+            "<@{}> 📦 Listing Makelar #{} kedaluwarsa.",
+            listing.player_id, listing.id
+        ),
+    };
     if let Some(item) = find_item(&listing.item_id) {
         let cap = inventory::slot_capacity_conn(conn, listing.player_id).await?;
         let p = inventory_repo::add_item(conn, listing.player_id, item, listing.quantity, cap)
             .await?;
-        if p.pending > 0 {
-            note = format!(
-                "<@{}> 📦 Listing Makelar **{} × {}** kedaluwarsa. ⚠️ Inventory penuh — masuk **Pending Claim**!",
-                listing.player_id, item.name, listing.quantity
-            );
+        let it_name = item_name(item.id, lang);
+        note = if p.pending > 0 {
+            match lang {
+                Lang::En => format!(
+                    "<@{}> 📦 Broker Listing **{} × {}** expired. ⚠️ Inventory full — moved to **Pending Claim**!",
+                    listing.player_id, it_name, listing.quantity
+                ),
+                Lang::Id => format!(
+                    "<@{}> 📦 Listing Makelar **{} × {}** kedaluwarsa. ⚠️ Inventory penuh — masuk **Pending Claim**!",
+                    listing.player_id, it_name, listing.quantity
+                ),
+            }
         } else {
-            note = format!(
-                "<@{}> 📦 Listing Makelar **{} × {}** kedaluwarsa dan dikembalikan ke inventory.",
-                listing.player_id, item.name, listing.quantity
-            );
-        }
+            match lang {
+                Lang::En => format!(
+                    "<@{}> 📦 Broker Listing **{} × {}** expired and was returned to your inventory.",
+                    listing.player_id, it_name, listing.quantity
+                ),
+                Lang::Id => format!(
+                    "<@{}> 📦 Listing Makelar **{} × {}** kedaluwarsa dan dikembalikan ke inventory.",
+                    listing.player_id, it_name, listing.quantity
+                ),
+            }
+        };
     }
     market_repo::mark_closed(conn, listing_id, "expired").await?;
     Ok(Some((listing.player_id, note)))
@@ -272,8 +333,36 @@ async fn run_market_tick_with_notes(
     conn: &mut PgConnection,
     fixed_demand_bps: Option<i64>,
 ) -> anyhow::Result<Vec<(i64, String)>> {
-    let rows = market_repo::list_prices(conn).await?;
     let mut rng = StdRng::from_entropy();
+    let cal_row = world_repo::get_calendar(conn).await?;
+    let (mut season, mut event, mut trend_id) = (
+        Season::parse(&cal_row.season).unwrap_or(Season::Spring),
+        cal_row.active_event.as_deref().and_then(WorldEvent::parse),
+        cal_row.trend_item_id.clone(),
+    );
+
+    if fixed_demand_bps.is_none() {
+        let (new_day, new_season, season_changed) = advance_calendar_day(cal_row.day, season);
+        season = new_season;
+        if season_changed || rng.gen_range(0..100) < 30 {
+            event = if rng.gen_bool(0.6) {
+                Some(WorldEvent::ALL[rng.gen_range(0..WorldEvent::ALL.len())])
+            } else {
+                None
+            };
+            trend_id = Some(ITEMS[rng.gen_range(0..ITEMS.len())].id.to_string());
+        }
+        world_repo::save_calendar(
+            conn,
+            new_day,
+            season.as_str(),
+            event.map(|e| e.as_str()),
+            trend_id.as_deref(),
+        )
+        .await?;
+    }
+
+    let rows = market_repo::list_prices(conn).await?;
     let mut current_prices: HashMap<String, Decimal> = HashMap::new();
 
     for r in rows {
@@ -283,7 +372,9 @@ async fn run_market_tick_with_notes(
         let step_bps = fixed_demand_bps.unwrap_or_else(|| rng.gen_range(-800..=800));
         let new_mult = next_multiplier(r.multiplier, r.recent_sales, step_bps);
         market_repo::update_price(conn, &r.item_id, new_mult).await?;
-        current_prices.insert(r.item_id, dynamic_price(npc_buy_price(item), new_mult));
+        let world_mult = world_price_multiplier(season, event, trend_id.as_deref(), item.id);
+        let combined = (new_mult * world_mult).round_dp(4);
+        current_prices.insert(r.item_id, dynamic_price(npc_buy_price(item), combined));
     }
 
     let active = market_repo::list_all_active(conn).await?;
@@ -309,17 +400,29 @@ async fn run_market_tick_with_notes(
         let key = format!("broker_sale:{}", locked.id);
         let _ = wallet_repo::apply(conn, locked.player_id, net, &reason, &key).await?;
         market_repo::mark_sold(conn, locked.id, mkt_price, commission).await?;
-        let item_name = find_item(&locked.item_id).map(|i| i.name).unwrap_or(&locked.item_id);
-        notes.push((
-            locked.player_id,
-            format!(
-                "<@{}> 💰 Listing Makelar **{} × {}** terjual! Bersih **{}** masuk ke Wallet.",
+        let lang = player_repo::get_lang(conn, locked.player_id)
+            .await
+            .unwrap_or(Lang::En);
+        let item_label = find_item(&locked.item_id)
+            .map(|i| item_name(i.id, lang))
+            .unwrap_or(&locked.item_id);
+        let msg = match lang {
+            Lang::En => format!(
+                "<@{}> 💰 Broker Listing **{} × {}** sold! Net **{}** credited to your Wallet.",
                 locked.player_id,
-                item_name,
+                item_label,
                 locked.quantity,
                 format_bac(net)
             ),
-        ));
+            Lang::Id => format!(
+                "<@{}> 💰 Listing Makelar **{} × {}** terjual! Bersih **{}** masuk ke Wallet.",
+                locked.player_id,
+                item_label,
+                locked.quantity,
+                format_bac(net)
+            ),
+        };
+        notes.push((locked.player_id, msg));
     }
 
     Ok(notes)
@@ -353,4 +456,28 @@ pub async fn ensure_market_tick_scheduled(pool: &PgPool, duration_pct: i64) -> a
         .await?;
     }
     Ok(())
+}
+
+pub async fn advance_world_day(
+    pool: &PgPool,
+    new_season: Option<Season>,
+    event: Option<WorldEvent>,
+    trend_item: Option<&str>,
+) -> anyhow::Result<CalendarView> {
+    let mut tx = pool.begin().await?;
+    let cur = world_repo::get_calendar(&mut *tx).await?;
+    let (next_day, auto_season, _) =
+        advance_calendar_day(cur.day, Season::parse(&cur.season).unwrap_or(Season::Spring));
+    let season = new_season.unwrap_or(auto_season);
+    world_repo::save_calendar(
+        &mut *tx,
+        next_day,
+        season.as_str(),
+        event.map(|e| e.as_str()),
+        trend_item,
+    )
+    .await?;
+    let updated = world_repo::get_calendar(&mut *tx).await?;
+    tx.commit().await?;
+    Ok(to_calendar_view(&updated))
 }

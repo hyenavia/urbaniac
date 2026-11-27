@@ -1,3 +1,4 @@
+use crate::domain::i18n::Lang;
 use chrono::{DateTime, Utc};
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -9,6 +10,13 @@ pub struct Player {
     /// XP di dalam level saat ini.
     pub xp: i64,
     pub created_at: DateTime<Utc>,
+    pub lang: String,
+}
+
+impl Player {
+    pub fn language(&self) -> Lang {
+        Lang::parse(&self.lang)
+    }
 }
 
 /// XP yang dibutuhkan untuk naik dari `level` ke `level + 1`. Nilai awal sementara.

@@ -1,3 +1,4 @@
+use crate::domain::i18n::Lang;
 use crate::domain::player::Player;
 use sqlx::PgConnection;
 
@@ -22,12 +23,30 @@ pub async fn insert_if_absent(
 
 pub async fn get(conn: &mut PgConnection, id: i64) -> sqlx::Result<Option<Player>> {
     sqlx::query_as::<_, Player>(
-        "SELECT discord_user_id, username, avatar_url, level, xp, created_at
+        "SELECT discord_user_id, username, avatar_url, level, xp, created_at, lang
          FROM players WHERE discord_user_id = $1",
     )
     .bind(id)
     .fetch_optional(&mut *conn)
     .await
+}
+
+pub async fn get_lang(conn: &mut PgConnection, id: i64) -> sqlx::Result<Lang> {
+    let raw: Option<String> =
+        sqlx::query_scalar("SELECT lang FROM players WHERE discord_user_id = $1")
+            .bind(id)
+            .fetch_optional(&mut *conn)
+            .await?;
+    Ok(raw.as_deref().map(Lang::parse).unwrap_or(Lang::En))
+}
+
+pub async fn set_lang(conn: &mut PgConnection, id: i64, lang: Lang) -> sqlx::Result<()> {
+    sqlx::query("UPDATE players SET lang = $2, updated_at = now() WHERE discord_user_id = $1")
+        .bind(id)
+        .bind(lang.as_str())
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
 }
 
 pub async fn update_profile(
@@ -83,4 +102,20 @@ pub async fn set_thread_id(conn: &mut PgConnection, id: i64, thread_id: i64) -> 
         .execute(&mut *conn)
         .await?;
     Ok(())
+}
+
+pub async fn claim_progression_reward_if_absent(
+    conn: &mut PgConnection,
+    player_id: i64,
+    reward_key: &str,
+) -> sqlx::Result<bool> {
+    let res = sqlx::query(
+        "INSERT INTO player_progression_rewards (player_id, reward_key)
+         VALUES ($1, $2) ON CONFLICT DO NOTHING",
+    )
+    .bind(player_id)
+    .bind(reward_key)
+    .execute(&mut *conn)
+    .await?;
+    Ok(res.rows_affected() == 1)
 }

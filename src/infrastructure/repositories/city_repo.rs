@@ -8,6 +8,10 @@ pub struct CityRow {
     pub player_id: i64,
     pub stage: String,
     pub treasury: Decimal,
+    pub tax_rate_pct: i32,
+    pub welfare: i32,
+    pub effectiveness_pct: i32,
+    pub local_modifier: Decimal,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -35,11 +39,74 @@ pub async fn create(conn: &mut PgConnection, player_id: i64) -> sqlx::Result<()>
 
 pub async fn get(conn: &mut PgConnection, player_id: i64) -> sqlx::Result<Option<CityRow>> {
     sqlx::query_as::<_, CityRow>(
-        "SELECT player_id, stage, treasury FROM cities WHERE player_id = $1",
+        "SELECT player_id, stage, treasury, tax_rate_pct, welfare, effectiveness_pct, local_modifier
+         FROM cities WHERE player_id = $1",
     )
     .bind(player_id)
     .fetch_optional(&mut *conn)
     .await
+}
+
+pub async fn list_all_cities(conn: &mut PgConnection) -> sqlx::Result<Vec<CityRow>> {
+    sqlx::query_as::<_, CityRow>(
+        "SELECT player_id, stage, treasury, tax_rate_pct, welfare, effectiveness_pct, local_modifier
+         FROM cities ORDER BY player_id",
+    )
+    .fetch_all(&mut *conn)
+    .await
+}
+
+pub async fn set_tax_rate(
+    conn: &mut PgConnection,
+    player_id: i64,
+    pct: i32,
+) -> sqlx::Result<()> {
+    sqlx::query("UPDATE cities SET tax_rate_pct = $2, updated_at = now() WHERE player_id = $1")
+        .bind(player_id)
+        .bind(pct)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
+pub async fn update_economy_state(
+    conn: &mut PgConnection,
+    player_id: i64,
+    welfare: i32,
+    effectiveness_pct: i32,
+    local_modifier: Decimal,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE cities
+         SET welfare = $2, effectiveness_pct = $3, local_modifier = $4,
+             last_economy_tick = now(), updated_at = now()
+         WHERE player_id = $1",
+    )
+    .bind(player_id)
+    .bind(welfare)
+    .bind(effectiveness_pct)
+    .bind(local_modifier)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
+pub async fn has_pending_city_economy_tick(conn: &mut PgConnection) -> sqlx::Result<bool> {
+    Ok(sqlx::query_scalar::<_, i64>(
+        "SELECT id FROM scheduled_jobs WHERE kind = 'city_economy_tick' AND status = 'pending' LIMIT 1",
+    )
+    .fetch_optional(&mut *conn)
+    .await?
+    .is_some())
+}
+
+pub async fn next_city_economy_tick_ref(conn: &mut PgConnection) -> sqlx::Result<i64> {
+    let max_ref: Option<i64> = sqlx::query_scalar(
+        "SELECT MAX(ref_id) FROM scheduled_jobs WHERE kind = 'city_economy_tick'",
+    )
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(max_ref.unwrap_or(0) + 1)
 }
 
 pub async fn get_stage(conn: &mut PgConnection, player_id: i64) -> sqlx::Result<Option<String>> {

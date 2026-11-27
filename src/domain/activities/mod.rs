@@ -137,7 +137,7 @@ pub fn roll_rewards<R: Rng>(def: &ActivityDef, level: i32, rng: &mut R) -> Vec<(
     roll_rewards_with_bonus(def, level, 0, 0, rng)
 }
 
-/// Mengundi reward dengan tambahan bonus Yield dan Luck (dari Kru).
+/// Mengundi reward dengan tambahan bonus Yield dan Luck (dari Kru & Kota).
 pub fn roll_rewards_with_bonus<R: Rng>(
     def: &ActivityDef,
     level: i32,
@@ -146,7 +146,7 @@ pub fn roll_rewards_with_bonus<R: Rng>(
     rng: &mut R,
 ) -> Vec<(&'static str, i64)> {
     let total: u32 = def.drops.iter().map(|d| d.weight).sum();
-    let bonus = yield_bonus_pct(level) + extra_yield_pct.max(0);
+    let bonus = (yield_bonus_pct(level) + extra_yield_pct).max(-50);
     let mut out: BTreeMap<&'static str, i64> = BTreeMap::new();
     if total == 0 {
         return Vec::new();
