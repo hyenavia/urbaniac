@@ -8,6 +8,8 @@ pub struct Config {
     pub database_url: String,
     pub guild_id: Option<u64>,
     pub db_max_connections: u32,
+    /// Skala durasi aktivitas dalam persen (100 = normal). Berguna untuk testing.
+    pub activity_duration_pct: i64,
 }
 
 impl Config {
@@ -25,6 +27,11 @@ impl Config {
             .and_then(|v| v.parse::<u32>().ok())
             .unwrap_or(MAX_DB_CONNECTIONS)
             .clamp(1, MAX_DB_CONNECTIONS);
-        Ok(Self { discord_token, database_url, guild_id, db_max_connections })
+        let activity_duration_pct = std::env::var("ACTIVITY_DURATION_PCT")
+            .ok()
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(100)
+            .clamp(1, 1000);
+        Ok(Self { discord_token, database_url, guild_id, db_max_connections, activity_duration_pct })
     }
 }

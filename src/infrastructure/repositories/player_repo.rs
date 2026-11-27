@@ -47,3 +47,22 @@ pub async fn update_profile(
     .await?;
     Ok(())
 }
+
+/// Mengunci baris pemain (urutan kunci: pemain -> baris lain). false jika pemain tidak ada.
+pub async fn lock(conn: &mut PgConnection, id: i64) -> sqlx::Result<bool> {
+    Ok(sqlx::query("SELECT 1 FROM players WHERE discord_user_id = $1 FOR UPDATE")
+        .bind(id)
+        .fetch_optional(&mut *conn)
+        .await?
+        .is_some())
+}
+
+pub async fn set_progress(conn: &mut PgConnection, id: i64, level: i32, xp: i64) -> sqlx::Result<()> {
+    sqlx::query("UPDATE players SET level = $2, xp = $3, updated_at = now() WHERE discord_user_id = $1")
+        .bind(id)
+        .bind(level)
+        .bind(xp)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}

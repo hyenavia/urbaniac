@@ -2734,6 +2734,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "dotenvy",
+ "rand 0.8.8",
  "rust_decimal",
  "serenity",
  "sqlx",

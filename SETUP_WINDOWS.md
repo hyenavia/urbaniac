@@ -15,3 +15,7 @@
    cargo run
    ```
    Migrasi dijalankan otomatis saat bot start. `.cargo/config.toml` sudah membatasi build ke 2 job.
+
+## Testing cepat
+Isi `ACTIVITY_DURATION_PCT=5` di `.env` agar aktivitas 20x lebih cepat (Farming 30 detik,
+Gathering 15 detik). Kembalikan ke 100 untuk bermain normal.

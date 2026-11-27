@@ -1,6 +1,8 @@
+use crate::application::activities::{ActivityOverview, ClaimSummary, RunStatus};
 use crate::application::inventory::{InventoryLine, InventoryView};
 use crate::application::player::ProfileView;
-use crate::domain::economy::format_bac;
+use crate::domain::economy::{format_bac, npc_buy_price};
+use crate::domain::resources::ItemDef;
 use crate::domain::player::xp_to_next;
 use serenity::all::{Colour, CreateEmbed};
 
@@ -14,8 +16,10 @@ pub fn help() -> CreateEmbed {
             "Urbaniac adalah game ekonomi dan pembangunan kota.\n\n\
              `/start` — buat profil dan buka menu\n\
              `/help` — tampilkan bantuan ini\n\n\
-             Tombol di menu: **Profil**, **Inventory**, **Klaim Pending**.\n\
-             Aktivitas (Farming, Gathering), pasar, dan proyek kota menyusul di tahap berikutnya.",
+             Tombol di menu: **Profil**, **Inventory**, **Aktivitas**, **Jual**, **Klaim Pending**.\n\
+             Mulai Farming atau Gathering di menu Aktivitas; aktivitas tetap berjalan saat kamu offline. \
+             Setelah selesai, tekan **Ambil Reward**, lalu jual hasilnya ke NPC.\n\
+             Proyek kota menyusul di tahap berikutnya.",
         )
 }
 
@@ -78,4 +82,106 @@ pub fn inventory(v: &InventoryView, note: Option<String>) -> CreateEmbed {
         e = e.description(n);
     }
     e
+}
+
+pub fn notice(title: &str, text: &str) -> CreateEmbed {
+    CreateEmbed::new().title(title).description(text).colour(Colour::new(COLOR))
+}
+
+pub fn activities(o: &ActivityOverview, note: Option<String>) -> CreateEmbed {
+    let mut lines: Vec<String> = Vec::new();
+    for r in &o.runs {
+        match r.status {
+            RunStatus::Running => {
+                lines.push(format!("{} — selesai <t:{}:R>", r.kind.name(), r.ends_at.timestamp()))
+            }
+            RunStatus::Ready => lines.push(format!("{} — **siap diambil**", r.kind.name())),
+        }
+    }
+    for _ in (o.runs.len() as i64)..o.slots_total {
+        lines.push("(slot kosong)".to_string());
+    }
+    let progress = o
+        .progress
+        .iter()
+        .map(|p| {
+            let extra = if p.state.overflow > 0 {
+                format!(" (+{} XP overflow)", p.state.overflow)
+            } else {
+                String::new()
+            };
+            format!(
+                "{} Lv {} — {}/{} XP, maks Lv {}{}",
+                p.kind.name(),
+                p.state.level,
+                p.state.xp,
+                p.xp_needed,
+                p.cap,
+                extra
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut e = CreateEmbed::new()
+        .title(format!("Aktivitas ({}/{} slot)", o.runs.len(), o.slots_total))
+        .colour(Colour::new(COLOR))
+        .field("Slot", lines.join("\n"), false)
+        .field("Level", progress, false);
+    if let Some(n) = note {
+        e = e.description(n);
+    }
+    e
+}
+
+pub fn claim_note(sums: &[ClaimSummary]) -> String {
+    if sums.is_empty() {
+        return "Belum ada reward yang siap diambil.".to_string();
+    }
+    sums.iter()
+        .map(|s| {
+            let items = s
+                .items
+                .iter()
+                .map(|(it, stored, pending)| {
+                    if *pending > 0 {
+                        format!("{} +{} ({} masuk Pending Claim)", it.name, stored, pending)
+                    } else {
+                        format!("{} +{}", it.name, stored)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", ");
+            let lvl = if s.new_level > s.old_level {
+                format!(" — naik ke Lv {}!", s.new_level)
+            } else {
+                String::new()
+            };
+            format!("{}: {}; +{} XP{}", s.kind.name(), items, s.xp_gain, lvl)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn sell_prompt(v: &InventoryView) -> CreateEmbed {
+    let text = v
+        .lines
+        .iter()
+        .map(|l| format!("{} × {} — {} / unit", l.item.name, l.quantity, format_bac(npc_buy_price(l.item))))
+        .collect::<Vec<_>>()
+        .join("\n");
+    CreateEmbed::new()
+        .title("Jual ke NPC")
+        .description(text)
+        .colour(Colour::new(COLOR))
+}
+
+pub fn sell_item(item: &ItemDef, owned: i64) -> CreateEmbed {
+    CreateEmbed::new()
+        .title(format!("Jual {}", item.name))
+        .description(format!(
+            "Kamu punya **{}**. Harga NPC: {} / unit.",
+            owned,
+            format_bac(npc_buy_price(item))
+        ))
+        .colour(Colour::new(COLOR))
 }

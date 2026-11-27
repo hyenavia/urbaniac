@@ -162,3 +162,13 @@ pub async fn claim_pending(
     }
     Ok(out)
 }
+
+pub async fn quantity_of(conn: &mut PgConnection, player_id: i64, item_id: &str) -> sqlx::Result<i64> {
+    let q: Option<i64> =
+        sqlx::query_scalar("SELECT quantity FROM inventory_items WHERE player_id = $1 AND item_id = $2")
+            .bind(player_id)
+            .bind(item_id)
+            .fetch_optional(&mut *conn)
+            .await?;
+    Ok(q.unwrap_or(0))
+}

@@ -1,6 +1,8 @@
 use anyhow::Result;
+use std::sync::Arc;
+use tokio::sync::Notify;
 use tracing_subscriber::EnvFilter;
-use urbaniac::{bot, config::Config, infrastructure::database};
+use urbaniac::{bot, config::Config, infrastructure::database, workers};
 
 #[tokio::main(worker_threads = 2)]
 async fn main() -> Result<()> {
@@ -12,6 +14,11 @@ async fn main() -> Result<()> {
     let cfg = Config::from_env()?;
     let pool = database::connect(&cfg).await?;
     database::migrate(&pool).await?;
+
+    // Satu instance scheduler. Job yang tertunda saat bot mati akan diproses saat start.
+    let notify = Arc::new(Notify::new());
+    tokio::spawn(workers::run_scheduler(pool.clone(), notify.clone()));
+
     tracing::info!("database siap, menjalankan bot");
-    bot::run(cfg, pool).await
+    bot::run(cfg, pool, notify).await
 }

@@ -9,8 +9,9 @@ thiserror = "1"
 chrono = "0.4"
 dotenvy = "0.15"
 rust_decimal = "1"
+rand = "0.8"
 serenity = "0.12"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "rust_decimal", "chrono", "migrate", "macros", "derive"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

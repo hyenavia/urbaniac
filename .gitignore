@@ -1,16 +1,2 @@
-# Rust build output
-/target/
-
-# Environment variables and secrets
+/target
 .env
-.env.*
-
-# Exceptions for example env files
-!.env.example
-
-# IDE
-.vscode/
-.idea/
-
-# Logs
-*.log

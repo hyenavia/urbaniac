@@ -7,9 +7,14 @@ use crate::config::Config;
 use serenity::all::*;
 use serenity::async_trait;
 use sqlx::PgPool;
+use std::sync::Arc;
+use tokio::sync::Notify;
 
 pub struct AppState {
     pub pool: PgPool,
+    /// Membangunkan scheduler saat ada job baru.
+    pub notify: Arc<Notify>,
+    pub activity_duration_pct: i64,
 }
 
 struct Handler {
@@ -43,8 +48,9 @@ impl EventHandler for Handler {
     }
 }
 
-pub async fn run(cfg: Config, pool: PgPool) -> anyhow::Result<()> {
-    let handler = Handler { app: AppState { pool }, guild_id: cfg.guild_id };
+pub async fn run(cfg: Config, pool: PgPool, notify: Arc<Notify>) -> anyhow::Result<()> {
+    let app = AppState { pool, notify, activity_duration_pct: cfg.activity_duration_pct };
+    let handler = Handler { app, guild_id: cfg.guild_id };
     let mut client = Client::builder(&cfg.discord_token, GatewayIntents::empty())
         .event_handler(handler)
         .await?;

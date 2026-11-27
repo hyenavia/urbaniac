@@ -28,17 +28,19 @@ pub struct ItemDef {
     pub name: &'static str,
     pub rarity: Rarity,
     pub stack_limit: i64,
+    /// Harga beli NPC per unit, dalam sen Bac (300 = 3.00 Bac). Nilai awal sementara.
+    pub npc_price_cents: i64,
 }
 
 /// Slot dasar inventory (Lumbung akan menambah di tahap City). Nilai awal sementara.
 pub const BASE_SLOT_CAPACITY: i64 = 12;
 
 pub const ITEMS: &[ItemDef] = &[
-    ItemDef { id: "wheat", name: "Gandum", rarity: Rarity::Common, stack_limit: 100 },
-    ItemDef { id: "potato", name: "Kentang", rarity: Rarity::Common, stack_limit: 100 },
-    ItemDef { id: "wood", name: "Kayu", rarity: Rarity::Common, stack_limit: 100 },
-    ItemDef { id: "berries", name: "Buah Hutan", rarity: Rarity::Common, stack_limit: 100 },
-    ItemDef { id: "wild_herb", name: "Herba Liar", rarity: Rarity::Uncommon, stack_limit: 50 },
+    ItemDef { id: "wheat", name: "Gandum", rarity: Rarity::Common, stack_limit: 100, npc_price_cents: 300 },
+    ItemDef { id: "potato", name: "Kentang", rarity: Rarity::Common, stack_limit: 100, npc_price_cents: 400 },
+    ItemDef { id: "wood", name: "Kayu", rarity: Rarity::Common, stack_limit: 100, npc_price_cents: 300 },
+    ItemDef { id: "berries", name: "Buah Hutan", rarity: Rarity::Common, stack_limit: 100, npc_price_cents: 350 },
+    ItemDef { id: "wild_herb", name: "Herba Liar", rarity: Rarity::Uncommon, stack_limit: 50, npc_price_cents: 1200 },
 ];
 
 pub fn find_item(id: &str) -> Option<&'static ItemDef> {
