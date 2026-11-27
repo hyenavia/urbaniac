@@ -20,7 +20,9 @@ async fn run_job(pool: &PgPool, job: &DueJob, duration_pct: i64) -> anyhow::Resu
         return Ok(());
     }
     match job.kind.as_str() {
-        activities::JOB_ACTIVITY_COMPLETE => activities::complete_run(&mut *tx, job.ref_id).await?,
+        activities::JOB_ACTIVITY_COMPLETE => {
+            activities::complete_run(&mut *tx, job.ref_id, duration_pct).await?
+        }
         city::JOB_CITY_PROJECT_COMPLETE => city::complete_project(&mut *tx, job.ref_id).await?,
         crafting::JOB_CRAFT_COMPLETE => crafting::complete_craft(&mut *tx, job.ref_id).await?,
         market::JOB_BROKER_EXPIRE => market::expire_listing(&mut *tx, job.ref_id).await?,

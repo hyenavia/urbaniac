@@ -1,5 +1,5 @@
 use crate::application::economy::{self, SaleOutcome, SellError, SellQty};
-use crate::application::{activities, city, crafting, inventory, market, player};
+use crate::application::{activities, city, crafting, crew, inventory, market, player};
 use crate::bot::{commands, components, embeds, AppState};
 use crate::domain::activities::ActivityKind;
 use crate::domain::city::ProjectId;
@@ -96,6 +96,24 @@ async fn show_craft(
         c,
         embeds::craft(&ov, note),
         components::craft_menu(id as u64, auto_sell),
+    )
+    .await
+}
+
+async fn show_crew(
+    ctx: &Context,
+    c: &ComponentInteraction,
+    app: &AppState,
+    id: i64,
+    note: Option<String>,
+) -> anyhow::Result<()> {
+    let list = crew::list(&app.pool, id).await?;
+    let has = !list.is_empty();
+    update(
+        ctx,
+        c,
+        embeds::crew(&list, note),
+        components::crew_menu(id as u64, has),
     )
     .await
 }
@@ -461,6 +479,108 @@ pub async fn handle_component(
                 Err(e) => e.to_string(),
             };
             show_craft(ctx, c, app, id, Some(note)).await
+        }
+        "crew" => show_crew(ctx, c, app, id, None).await,
+        "crewhire" => {
+            let key = format!("crewhire:{}", c.id.get());
+            let note = match crew::recruit(&app.pool, id, &key).await {
+                Ok(cw) => format!(
+                    "Berhasil merekrut **{}** [{}] (Spesialis {}).",
+                    cw.name,
+                    cw.rarity,
+                    cw.specialty.name()
+                ),
+                Err(crew::CrewError::Db(e)) => return Err(e.into()),
+                Err(crew::CrewError::Wallet(e)) => return Err(e.into()),
+                Err(e) => e.to_string(),
+            };
+            show_crew(ctx, c, app, id, Some(note)).await
+        }
+        "crewupg" => {
+            let list = crew::list(&app.pool, id).await?;
+            if list.is_empty() {
+                return show_crew(ctx, c, app, id, Some("Belum ada kru.".to_string())).await;
+            }
+            let items: Vec<(i64, String)> = list
+                .iter()
+                .map(|cw| {
+                    let cost = cw.upgrade_cost.map(format_bac).unwrap_or_else(|| "Maks".to_string());
+                    (cw.id, format!("#{} {} Lv {} ({})", cw.id, cw.name, cw.level, cost))
+                })
+                .collect();
+            update(
+                ctx,
+                c,
+                embeds::notice("Upgrade Kru", "Pilih kru yang ingin di-upgrade."),
+                components::crew_select(owner, "crewupgpick", &items, "Pilih kru"),
+            )
+            .await
+        }
+        "crewupgpick" => {
+            let picked = match &c.data.kind {
+                ComponentInteractionDataKind::StringSelect { values } => values.first().cloned(),
+                _ => None,
+            };
+            let Some(crew_id) = picked.and_then(|s| s.parse::<i64>().ok()) else { return Ok(()) };
+            let key = format!("crewupg:{}", c.id.get());
+            let note = match crew::upgrade(&app.pool, id, crew_id, &key).await {
+                Ok(cw) => format!("**{}** naik ke Lv {}!", cw.name, cw.level),
+                Err(crew::CrewError::Db(e)) => return Err(e.into()),
+                Err(crew::CrewError::Wallet(e)) => return Err(e.into()),
+                Err(e) => e.to_string(),
+            };
+            show_crew(ctx, c, app, id, Some(note)).await
+        }
+        "crewassign" => {
+            let list = crew::list(&app.pool, id).await?;
+            if list.is_empty() {
+                return show_crew(ctx, c, app, id, Some("Belum ada kru.".to_string())).await;
+            }
+            let items: Vec<(i64, String)> = list
+                .iter()
+                .map(|cw| (cw.id, format!("#{} {} [{} Lv {}]", cw.id, cw.name, cw.rarity, cw.level)))
+                .collect();
+            update(
+                ctx,
+                c,
+                embeds::notice("Tugaskan Kru", "Pilih kru untuk ditugaskan ke aktivitas."),
+                components::crew_select(owner, "crewassignpick", &items, "Pilih kru"),
+            )
+            .await
+        }
+        "crewassignpick" => {
+            let picked = match &c.data.kind {
+                ComponentInteractionDataKind::StringSelect { values } => values.first().cloned(),
+                _ => None,
+            };
+            let Some(crew_id) = picked.and_then(|s| s.parse::<i64>().ok()) else { return Ok(()) };
+            update(
+                ctx,
+                c,
+                embeds::notice("Pilih Tugas Aktivitas", "Pilih aktivitas dan mode otomasi untuk kru ini."),
+                components::crew_assign_activity(owner, crew_id),
+            )
+            .await
+        }
+        "crewset" => {
+            let parts: Vec<&str> = rest.splitn(3, ':').collect();
+            if parts.len() != 3 {
+                return Ok(());
+            }
+            let Ok(crew_id) = parts[0].parse::<i64>() else { return Ok(()) };
+            let act = if parts[1] == "none" { None } else { ActivityKind::parse(parts[1]) };
+            let auto = parts[2] == "1";
+            let note = match crew::assign(&app.pool, id, crew_id, act, auto).await {
+                Ok(cw) => match cw.assigned {
+                    Some(a) if cw.auto_enabled => format!("**{}** ditugaskan ke {} (AUTO).", cw.name, a.name()),
+                    Some(a) => format!("**{}** ditugaskan ke {} (Manual).", cw.name, a.name()),
+                    None => format!("**{}** dilepas dari tugas.", cw.name),
+                },
+                Err(crew::CrewError::Db(e)) => return Err(e.into()),
+                Err(crew::CrewError::Wallet(e)) => return Err(e.into()),
+                Err(e) => e.to_string(),
+            };
+            show_crew(ctx, c, app, id, Some(note)).await
         }
         "mktcancel" => {
             let ov = market::overview(&app.pool, id).await?;

@@ -94,13 +94,29 @@ pub fn yield_bonus_pct(level: i32) -> i64 {
 
 /// Mengundi reward saat aktivitas selesai.
 pub fn roll_rewards<R: Rng>(def: &ActivityDef, level: i32, rng: &mut R) -> Vec<(&'static str, i64)> {
+    roll_rewards_with_bonus(def, level, 0, 0, rng)
+}
+
+/// Mengundi reward dengan tambahan bonus Yield dan Luck (dari Kru).
+pub fn roll_rewards_with_bonus<R: Rng>(
+    def: &ActivityDef,
+    level: i32,
+    extra_yield_pct: i64,
+    luck_pct: i64,
+    rng: &mut R,
+) -> Vec<(&'static str, i64)> {
     let total: u32 = def.drops.iter().map(|d| d.weight).sum();
-    let bonus = yield_bonus_pct(level);
+    let bonus = yield_bonus_pct(level) + extra_yield_pct.max(0);
     let mut out: BTreeMap<&'static str, i64> = BTreeMap::new();
     if total == 0 {
         return Vec::new();
     }
-    for _ in 0..def.rolls {
+    let extra_roll = if luck_pct > 0 && rng.gen_range(0..100) < luck_pct.min(100) {
+        1
+    } else {
+        0
+    };
+    for _ in 0..(def.rolls + extra_roll) {
         let mut pick = rng.gen_range(0..total);
         for d in def.drops {
             if pick < d.weight {

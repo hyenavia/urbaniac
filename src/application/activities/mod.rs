@@ -1,6 +1,9 @@
-use crate::application::{city, inventory};
-use crate::domain::activities::{def, roll_rewards, ActivityKind, BASE_ACTIVITY_SLOTS};
+use crate::application::{city, crew, inventory};
+use crate::domain::activities::{
+    def, roll_rewards_with_bonus, ActivityKind, BASE_ACTIVITY_SLOTS,
+};
 use crate::domain::city::CityStage;
+use crate::domain::crew::apply_efficiency_duration;
 use crate::domain::player::xp_to_next;
 use crate::domain::progression::{activity_level_cap, apply_xp, XpState, NO_CAP};
 use crate::domain::resources::{find_item, ItemDef};
@@ -83,7 +86,9 @@ pub async fn start(
     if activity_repo::count_occupied(&mut *tx, player_id).await? >= total {
         return Err(ActivityError::NoFreeSlot(total));
     }
-    let secs = (def(kind).duration_secs * duration_pct.max(1) / 100).max(1);
+    let (crew_bonus, _) = crew::bonus_for_activity_conn(&mut *tx, player_id, kind).await?;
+    let eff_secs = apply_efficiency_duration(def(kind).duration_secs, crew_bonus.efficiency_pct);
+    let secs = (eff_secs * duration_pct.max(1) / 100).max(1);
     let (id, ends_at) = activity_repo::insert_run(&mut *tx, player_id, kind.as_str(), secs).await?;
     scheduler::enqueue(&mut *tx, JOB_ACTIVITY_COMPLETE, id, ends_at).await?;
     tx.commit().await?;
@@ -119,7 +124,13 @@ pub async fn overview(pool: &PgPool, player_id: i64) -> anyhow::Result<ActivityO
 }
 
 /// Dipanggil worker di dalam transaksi job. Idempoten: hanya memproses run berstatus 'running'.
-pub async fn complete_run(conn: &mut PgConnection, run_id: i64) -> anyhow::Result<()> {
+/// Jika kru terpasang punya `auto_enabled = true`, reward otomatis diklaim dan aktivitas
+/// dimulai ulang pada slot yang sama (tanpa menambah Activity Slot).
+pub async fn complete_run(
+    conn: &mut PgConnection,
+    run_id: i64,
+    duration_pct: i64,
+) -> anyhow::Result<()> {
     let Some(run) = activity_repo::lock_run(conn, run_id).await? else {
         return Ok(());
     };
@@ -129,21 +140,47 @@ pub async fn complete_run(conn: &mut PgConnection, run_id: i64) -> anyhow::Resul
     let kind = ActivityKind::parse(&run.activity)
         .ok_or_else(|| anyhow::anyhow!("aktivitas tidak dikenal: {}", run.activity))?;
     let progress = activity_repo::get_progress(conn, run.player_id, kind.as_str()).await?;
-    let mut rng = StdRng::from_entropy();
-    let rewards = roll_rewards(def(kind), progress.level, &mut rng);
+    let (crew_bonus, auto_enabled) =
+        crew::bonus_for_activity_conn(conn, run.player_id, kind).await?;
+    let rewards = {
+        let mut rng = StdRng::from_entropy();
+        roll_rewards_with_bonus(
+            def(kind),
+            progress.level,
+            crew_bonus.yield_pct,
+            crew_bonus.luck_pct,
+            &mut rng,
+        )
+    };
     for (item_id, qty) in rewards {
         activity_repo::insert_reward(conn, run_id, item_id, qty).await?;
     }
     activity_repo::mark_ready(conn, run_id).await?;
+
+    if auto_enabled {
+        let _ = claim_one_conn(conn, run.player_id, run_id).await?;
+        let total = slot_total(run.player_id);
+        if activity_repo::count_occupied(conn, run.player_id).await? < total {
+            let eff_secs =
+                apply_efficiency_duration(def(kind).duration_secs, crew_bonus.efficiency_pct);
+            let secs = (eff_secs * duration_pct.max(1) / 100).max(1);
+            let (new_id, ends_at) =
+                activity_repo::insert_run(conn, run.player_id, kind.as_str(), secs).await?;
+            scheduler::enqueue(conn, JOB_ACTIVITY_COMPLETE, new_id, ends_at).await?;
+        }
+    }
     Ok(())
 }
 
-async fn claim_one(pool: &PgPool, player_id: i64, run_id: i64) -> anyhow::Result<Option<ClaimSummary>> {
-    let mut tx = pool.begin().await?;
-    if !player_repo::lock(&mut *tx, player_id).await? {
+async fn claim_one_conn(
+    conn: &mut PgConnection,
+    player_id: i64,
+    run_id: i64,
+) -> anyhow::Result<Option<ClaimSummary>> {
+    if !player_repo::lock(conn, player_id).await? {
         return Ok(None);
     }
-    let Some(run) = activity_repo::lock_run(&mut *tx, run_id).await? else {
+    let Some(run) = activity_repo::lock_run(conn, run_id).await? else {
         return Ok(None);
     };
     if run.player_id != player_id || run.status != "ready" {
@@ -152,29 +189,34 @@ async fn claim_one(pool: &PgPool, player_id: i64, run_id: i64) -> anyhow::Result
     let kind = ActivityKind::parse(&run.activity)
         .ok_or_else(|| anyhow::anyhow!("aktivitas tidak dikenal: {}", run.activity))?;
 
-    let cap_slots = inventory::slot_capacity_conn(&mut *tx, player_id).await?;
+    let cap_slots = inventory::slot_capacity_conn(conn, player_id).await?;
     let mut items = Vec::new();
-    for (item_id, qty) in activity_repo::list_rewards(&mut *tx, run_id).await? {
+    for (item_id, qty) in activity_repo::list_rewards(conn, run_id).await? {
         let Some(item) = find_item(&item_id) else { continue };
-        let p = inventory_repo::add_item(&mut *tx, player_id, item, qty, cap_slots).await?;
+        let p = inventory_repo::add_item(conn, player_id, item, qty, cap_slots).await?;
         items.push((item, p.stored, p.pending));
     }
 
     let xp_gain = def(kind).xp_reward;
-    let cap = activity_level_cap(city::stage_for_conn(&mut *tx, player_id).await?);
-    let old = activity_repo::lock_progress(&mut *tx, player_id, kind.as_str()).await?;
+    let cap = activity_level_cap(city::stage_for_conn(conn, player_id).await?);
+    let old = activity_repo::lock_progress(conn, player_id, kind.as_str()).await?;
     let new = apply_xp(old, xp_gain, cap);
-    activity_repo::save_progress(&mut *tx, player_id, kind.as_str(), new).await?;
+    activity_repo::save_progress(conn, player_id, kind.as_str(), new).await?;
 
-    // XP pemain (tanpa cap untuk saat ini).
-    if let Some(p) = crate::infrastructure::repositories::player_repo::get(&mut *tx, player_id).await? {
+    if let Some(p) = player_repo::get(conn, player_id).await? {
         let ps = apply_xp(XpState { level: p.level, xp: p.xp, overflow: 0 }, xp_gain, NO_CAP);
-        player_repo::set_progress(&mut *tx, player_id, ps.level, ps.xp).await?;
+        player_repo::set_progress(conn, player_id, ps.level, ps.xp).await?;
     }
 
-    activity_repo::mark_claimed(&mut *tx, run_id).await?;
-    tx.commit().await?;
+    activity_repo::mark_claimed(conn, run_id).await?;
     Ok(Some(ClaimSummary { kind, items, xp_gain, old_level: old.level, new_level: new.level }))
+}
+
+async fn claim_one(pool: &PgPool, player_id: i64, run_id: i64) -> anyhow::Result<Option<ClaimSummary>> {
+    let mut tx = pool.begin().await?;
+    let res = claim_one_conn(&mut *tx, player_id, run_id).await?;
+    tx.commit().await?;
+    Ok(res)
 }
 
 /// Mengambil semua reward yang sudah siap. Tiap run diproses dalam transaksinya sendiri.

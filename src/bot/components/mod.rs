@@ -18,6 +18,7 @@ pub fn main_menu(owner: u64) -> Vec<CreateActionRow> {
             btn("inventory", owner, "", "Inventory", ButtonStyle::Secondary),
             btn("activities", owner, "", "Aktivitas", ButtonStyle::Primary),
             btn("city", owner, "", "Kota", ButtonStyle::Primary),
+            btn("crew", owner, "", "Kru", ButtonStyle::Primary),
         ]),
         CreateActionRow::Buttons(vec![
             btn("market", owner, "", "Pasar & Makelar", ButtonStyle::Success),
@@ -237,5 +238,53 @@ pub fn order_select(owner: u64, orders: &[(i64, String)]) -> Vec<CreateActionRow
             .placeholder("Pilih pesanan NPC untuk dipenuhi"),
         ),
         CreateActionRow::Buttons(vec![btn("craft", owner, "", "Kembali", ButtonStyle::Secondary)]),
+    ]
+}
+
+pub fn crew_menu(owner: u64, has_crews: bool) -> Vec<CreateActionRow> {
+    let mut row1 = vec![btn("crewhire", owner, "", "Rekrut Kru (100 Bac)", ButtonStyle::Success)];
+    if has_crews {
+        row1.push(btn("crewassign", owner, "", "Tugaskan & Otomasi", ButtonStyle::Primary));
+        row1.push(btn("crewupg", owner, "", "Upgrade Kru", ButtonStyle::Primary));
+    }
+    vec![
+        CreateActionRow::Buttons(row1),
+        CreateActionRow::Buttons(vec![
+            btn("crew", owner, "", "Refresh", ButtonStyle::Secondary),
+            btn("profile", owner, "", "Menu Utama", ButtonStyle::Secondary),
+        ]),
+    ]
+}
+
+pub fn crew_select(owner: u64, action: &str, crews: &[(i64, String)], placeholder: &str) -> Vec<CreateActionRow> {
+    let options: Vec<CreateSelectMenuOption> = crews
+        .iter()
+        .take(25)
+        .map(|(id, label)| CreateSelectMenuOption::new(label.clone(), id.to_string()))
+        .collect();
+    vec![
+        CreateActionRow::SelectMenu(
+            CreateSelectMenu::new(
+                format!("{PREFIX}:{action}:{owner}"),
+                CreateSelectMenuKind::String { options },
+            )
+            .placeholder(placeholder),
+        ),
+        CreateActionRow::Buttons(vec![btn("crew", owner, "", "Kembali", ButtonStyle::Secondary)]),
+    ]
+}
+
+pub fn crew_assign_activity(owner: u64, crew_id: i64) -> Vec<CreateActionRow> {
+    vec![
+        CreateActionRow::Buttons(vec![
+            btn("crewset", owner, &format!("{crew_id}:farming:1"), "Farming + Auto", ButtonStyle::Success),
+            btn("crewset", owner, &format!("{crew_id}:gathering:1"), "Gathering + Auto", ButtonStyle::Success),
+            btn("crewset", owner, &format!("{crew_id}:farming:0"), "Farming (Manual)", ButtonStyle::Primary),
+            btn("crewset", owner, &format!("{crew_id}:gathering:0"), "Gathering (Manual)", ButtonStyle::Primary),
+        ]),
+        CreateActionRow::Buttons(vec![
+            btn("crewset", owner, &format!("{crew_id}:none:0"), "Lepas Tugas", ButtonStyle::Danger),
+            btn("crew", owner, "", "Kembali", ButtonStyle::Secondary),
+        ]),
     ]
 }

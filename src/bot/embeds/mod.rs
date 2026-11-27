@@ -1,6 +1,7 @@
 use crate::application::activities::{ActivityOverview, ClaimSummary, RunStatus};
 use crate::application::city::CityOverview;
 use crate::application::crafting::CraftOverview;
+use crate::application::crew::CrewView;
 use crate::application::inventory::{InventoryLine, InventoryView};
 use crate::application::market::MarketOverview;
 use crate::application::player::ProfileView;
@@ -385,6 +386,48 @@ pub fn craft(ov: &CraftOverview, note: Option<String>) -> CreateEmbed {
         .field("Crafting Berjalan (maks 2)", running, false)
         .field("Resep", recipes, false)
         .field("Pesanan NPC Aktif", orders, false);
+    if let Some(n) = note {
+        e = e.description(n);
+    }
+    e
+}
+
+pub fn crew(crews: &[CrewView], note: Option<String>) -> CreateEmbed {
+    let list = if crews.is_empty() {
+        "Belum ada kru. Rekrut kru untuk bonus Efficiency, Yield, Luck, dan otomasi aktivitas!".to_string()
+    } else {
+        crews
+            .iter()
+            .map(|c| {
+                let task = match c.assigned {
+                    Some(a) if c.auto_enabled => format!("{} [AUTO]", a.name()),
+                    Some(a) => a.name().to_string(),
+                    None => "Menganggur".to_string(),
+                };
+                let upg = c
+                    .upgrade_cost
+                    .map(|u| format!("Upgrade: {}", format_bac(u)))
+                    .unwrap_or_else(|| "Maks Lv".to_string());
+                format!(
+                    "#{} **{}** [{} Lv {}] — Spesialis: {}\nTugas: {} • Eff +{}% / Yield +{}% / Luck +{}% • {}",
+                    c.id,
+                    c.name,
+                    c.rarity,
+                    c.level,
+                    c.specialty.name(),
+                    task,
+                    c.bonus.efficiency_pct,
+                    c.bonus.yield_pct,
+                    c.bonus.luck_pct,
+                    upg
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n")
+    };
+    let mut e = branding::styled_embed(branding::COLOR_GENERAL)
+        .title(format!("Kru & Automasi ({}/4)", crews.len()))
+        .field("Daftar Kru", list, false);
     if let Some(n) = note {
         e = e.description(n);
     }
