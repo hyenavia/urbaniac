@@ -3,6 +3,8 @@ pub mod city;
 pub mod crafting;
 pub mod crew;
 pub mod economy;
+pub mod giveaway;
 pub mod inventory;
 pub mod market;
 pub mod player;
+pub mod voice_boost;

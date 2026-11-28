@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { newRequestId } from "../api/client";
 import type { ActivityKindKey, CitySnapshot, ProjectKey } from "../api/types";
-import { slotLabel, type UiLang } from "../i18n";
+import { slotLabel } from "../i18n";
 import { findSlotSpec, type MapSlotId } from "../scene/assetRegistry";
 
 interface InspectorPanelProps {
@@ -9,7 +9,6 @@ interface InspectorPanelProps {
   snapshot: CitySnapshot;
   nowMs: number;
   busy: boolean;
-  lang: UiLang;
   onClose: () => void;
   onStartActivity: (kind: ActivityKindKey) => void;
   onCollectActivities: () => void;
@@ -34,7 +33,7 @@ export function formatCountdown(
   );
   const mins = Math.floor(diffSec / 60);
   const secs = diffSec % 60;
-  return `${mins}m ${String(secs).padStart(2, "0")}d`;
+  return `${mins}m ${String(secs).padStart(2, "0")}s`;
 }
 
 export function InspectorPanel({
@@ -42,7 +41,6 @@ export function InspectorPanel({
   snapshot,
   nowMs,
   busy,
-  lang,
   onClose,
   onStartActivity,
   onCollectActivities,
@@ -65,9 +63,9 @@ export function InspectorPanel({
   return (
     <aside className="side-panel">
       <div className="panel-header">
-        <h2>{slotLabel(spec.id, lang)}</h2>
+        <h2>{slotLabel(spec.id)}</h2>
         <button type="button" className="btn-ghost" onClick={onClose}>
-          Tutup
+          Close
         </button>
       </div>
 
@@ -86,7 +84,7 @@ export function InspectorPanel({
               <>
                 <div className="card">
                   <div className="kv-row">
-                    <span className="muted">Level Saat Ini</span>
+                    <span className="muted">Current Level</span>
                     <strong className="mono">
                       {lvl} / {quote?.max_level ?? 1}
                     </strong>
@@ -98,16 +96,16 @@ export function InspectorPanel({
                       className="btn-ghost btn-sm"
                       onClick={onOpenMarket}
                     >
-                      Buka Pasar & Makelar
+                      Open Market & Broker
                     </button>
                   )}
                 </div>
 
                 {running && (
                   <div className="card">
-                    <h3>Sedang Dibangun</h3>
+                    <h3>Under Construction</h3>
                     <div className="kv-row">
-                      <span>Sisa Waktu</span>
+                      <span>Time Remaining</span>
                       <strong className="mono warn-text">
                         {formatCountdown(running.ends_at, nowMs, clockOffsetMs)}
                       </strong>
@@ -119,22 +117,22 @@ export function InspectorPanel({
                   <div className="card">
                     <h3>
                       {quote.current_level === 0
-                        ? "Rincian Pembangunan"
-                        : `Upgrade ke Lv ${quote.next_level}`}
+                        ? "Build Details"
+                        : `Upgrade to Lv ${quote.next_level}`}
                     </h3>
                     <div className="kv-row">
-                      <span>Stage Minimum</span>
+                      <span>Minimum Stage</span>
                       <span>{quote.min_stage_name}</span>
                     </div>
                     <div className="kv-row">
-                      <span>Biaya Bac</span>
+                      <span>Bac Cost</span>
                       <span className="mono">
-                        {quote.cost_bac} Bac (tersedia {quote.available_bac})
+                        {quote.cost_bac} Bac (available {quote.available_bac})
                       </span>
                     </div>
                     <div className="kv-row">
-                      <span>Durasi</span>
-                      <span className="mono">{quote.duration_secs} detik</span>
+                      <span>Duration</span>
+                      <span className="mono">{quote.duration_secs}s</span>
                     </div>
                     {quote.items.map((it) => (
                       <div className="list-item" key={it.item_id}>
@@ -150,22 +148,22 @@ export function InspectorPanel({
                     ))}
                     {quote.block_reason ? (
                       <p className="warn-text" style={{ fontSize: 12 }}>
-                        Belum bisa dimulai: {quote.block_reason}
+                        Cannot start yet: {quote.block_reason}
                       </p>
                     ) : (
                       <p className="ok-text" style={{ fontSize: 12 }}>
-                        Semua syarat terpenuhi.
+                        All requirements met.
                       </p>
                     )}
 
                     {!running &&
                       (confirmProjReqId ? (
                         <div className="confirm-box">
-                          <strong>Konfirmasi Biaya Proyek</strong>
+                          <strong>Confirm Project Cost</strong>
                           <p className="muted">
-                            Akan memotong <strong>{quote.cost_bac} Bac</strong>{" "}
-                            (Treasury terlebih dahulu, sisa dari Wallet) beserta
-                            resource yang tercantum di atas.
+                            This will deduct <strong>{quote.cost_bac} Bac</strong>{" "}
+                            (from Treasury first, remainder from Wallet) along with
+                            the resources listed above.
                           </p>
                           <div className="action-row">
                             <button
@@ -178,7 +176,7 @@ export function InspectorPanel({
                                 onStartProject(quote.project, rid);
                               }}
                             >
-                              Konfirmasi & Mulai
+                              Confirm & Start
                             </button>
                             <button
                               type="button"
@@ -186,7 +184,7 @@ export function InspectorPanel({
                               disabled={busy}
                               onClick={() => setConfirmProjReqId(null)}
                             >
-                              Batal
+                              Cancel
                             </button>
                           </div>
                         </div>
@@ -198,8 +196,8 @@ export function InspectorPanel({
                           onClick={() => setConfirmProjReqId(newRequestId())}
                         >
                           {quote.current_level === 0
-                            ? `Bangun ${quote.name}`
-                            : `Upgrade ke Lv ${quote.next_level}`}
+                            ? `Build ${quote.name}`
+                            : `Upgrade to Lv ${quote.next_level}`}
                         </button>
                       ))}
                   </div>
@@ -223,29 +221,29 @@ export function InspectorPanel({
               <>
                 <div className="card">
                   <div className="kv-row">
-                    <span>Status Zona</span>
+                    <span>Zone Status</span>
                     <span className={cat?.unlocked ? "ok-text" : "warn-text"}>
                       {cat?.unlocked
-                        ? "Terbuka"
-                        : `Terkunci (Butuh ${cat?.min_stage_name ?? "-"})`}
+                        ? "Unlocked"
+                        : `Locked (Requires ${cat?.min_stage_name ?? "-"})`}
                     </span>
                   </div>
                   <div className="kv-row">
-                    <span>Activity Slot</span>
+                    <span>Activity Slots</span>
                     <span className="mono">
-                      {totalBusy} / {totalSlots} terpakai
+                      {totalBusy} / {totalSlots} used
                     </span>
                   </div>
                   {cat && (
                     <>
                       <div className="kv-row">
-                        <span>Durasi Dasar</span>
+                        <span>Base Duration</span>
                         <span className="mono">
-                          {cat.base_duration_secs} detik
+                          {cat.base_duration_secs}s
                         </span>
                       </div>
                       <div className="kv-row">
-                        <span>Hadiah XP</span>
+                        <span>XP Reward</span>
                         <span className="mono">+{cat.xp_reward} XP</span>
                       </div>
                     </>
@@ -258,7 +256,7 @@ export function InspectorPanel({
                         disabled={!cat.unlocked || !hasFreeSlot || busy}
                         onClick={() => onStartActivity(cat.kind)}
                       >
-                        Mulai {cat.name}
+                        Start {cat.name}
                       </button>
                     )}
                     {readyCount > 0 && (
@@ -268,7 +266,7 @@ export function InspectorPanel({
                         disabled={busy}
                         onClick={onCollectActivities}
                       >
-                        Ambil Reward ({readyCount})
+                        Collect Rewards ({readyCount})
                       </button>
                     )}
                   </div>
@@ -276,7 +274,7 @@ export function InspectorPanel({
 
                 {prog && (
                   <div className="card">
-                    <h3>Progres Aktivitas</h3>
+                    <h3>Activity Progress</h3>
                     <div className="kv-row">
                       <span>Level</span>
                       <strong className="mono">
@@ -299,17 +297,17 @@ export function InspectorPanel({
                 )}
 
                 <div className="card">
-                  <h3>Slot Berjalan ({runs.length})</h3>
+                  <h3>Active Slots ({runs.length})</h3>
                   {runs.length === 0 ? (
                     <p className="muted">
-                      Belum ada aktivitas berjalan di zona ini.
+                      No active runs in this zone.
                     </p>
                   ) : (
                     runs.map((r) => (
                       <div className="list-item" key={r.id}>
                         <span>{r.name}</span>
                         {r.status === "ready" ? (
-                          <span className="pill pill-gold">SIAP DIKLAIM</span>
+                          <span className="pill pill-gold">READY</span>
                         ) : (
                           <span className="mono warn-text">
                             {formatCountdown(r.ends_at, nowMs, clockOffsetMs)}
@@ -326,21 +324,21 @@ export function InspectorPanel({
         {spec.category === "market" && (
           <div className="card">
             <div className="kv-row">
-              <h3>Jual Langsung ke NPC</h3>
+              <h3>Direct Sell to NPC</h3>
               <button
                 type="button"
                 className="btn-primary btn-sm"
                 onClick={onOpenMarket}
               >
-                Pasar & Makelar
+                Market & Broker
               </button>
             </div>
             <p className="muted">
-              Pilih jumlah item dari inventory untuk dijual pada harga NPC saat
-              ini.
+              Select item quantity from your inventory to sell at the current NPC
+              price.
             </p>
             {!inventory || inventory.items.length === 0 ? (
-              <p className="muted">Inventory masih kosong.</p>
+              <p className="muted">Your inventory is empty.</p>
             ) : (
               inventory.items.map((it) => {
                 const rawQty = sellQtys[it.item_id] ?? "1";
@@ -358,7 +356,7 @@ export function InspectorPanel({
                       <div>
                         <strong>{it.name}</strong>
                         <div className="muted">
-                          {it.rarity} • Stok {it.quantity}
+                          {it.rarity} • Stock {it.quantity}
                         </div>
                       </div>
                       <strong className="mono">{it.npc_unit_price} Bac</strong>
@@ -390,7 +388,7 @@ export function InspectorPanel({
                           })
                         }
                       >
-                        Jual
+                        Sell
                       </button>
                       <button
                         type="button"
@@ -404,7 +402,7 @@ export function InspectorPanel({
                           })
                         }
                       >
-                        Semua ({it.quantity})
+                        All ({it.quantity})
                       </button>
                     </div>
                   </div>

@@ -17,6 +17,8 @@ pub struct Config {
     pub discord_token: String,
     pub database_url: String,
     pub guild_id: Option<u64>,
+    pub bot_owner_id: Option<u64>,
+    pub voice_boost_channel_id: Option<u64>,
     pub db_max_connections: u32,
     /// Skala durasi aktivitas dalam persen (100 = normal). Berguna untuk testing.
     pub activity_duration_pct: i64,
@@ -46,6 +48,14 @@ impl Config {
         let database_url = non_empty(&get, "DATABASE_URL").context("DATABASE_URL belum diisi")?;
         let guild_id = match non_empty(&get, "DISCORD_GUILD_ID") {
             Some(v) => Some(v.parse::<u64>().context("DISCORD_GUILD_ID harus angka")?),
+            None => None,
+        };
+        let bot_owner_id = match non_empty(&get, "BOT_OWNER_ID") {
+            Some(v) => Some(v.parse::<u64>().context("BOT_OWNER_ID harus angka")?),
+            None => None,
+        };
+        let voice_boost_channel_id = match non_empty(&get, "VOICE_BOOST_CHANNEL_ID") {
+            Some(v) => Some(v.parse::<u64>().context("VOICE_BOOST_CHANNEL_ID harus angka")?),
             None => None,
         };
         let db_max_connections = non_empty(&get, "DB_MAX_CONNECTIONS")
@@ -80,6 +90,8 @@ impl Config {
             discord_token,
             database_url,
             guild_id,
+            bot_owner_id,
+            voice_boost_channel_id,
             db_max_connections,
             activity_duration_pct,
             activity: ActivityConfig {
@@ -158,5 +170,34 @@ mod tests {
         assert_eq!(cfg.activity.static_dir, "./dist");
         assert_eq!(cfg.activity.client_id.as_deref(), Some("123456"));
         assert_eq!(cfg.activity.client_secret.as_deref(), Some("secret"));
+    }
+
+    #[test]
+    fn parses_optional_owner_and_voice_boost_ids() {
+        let cfg = Config::from_lookup(lookup_from(&[
+            ("DISCORD_TOKEN", "bot-token"),
+            ("DATABASE_URL", "postgres://localhost/urbaniac"),
+            ("BOT_OWNER_ID", "111222333"),
+            ("VOICE_BOOST_CHANNEL_ID", "444555666"),
+        ]))
+        .unwrap();
+        assert_eq!(cfg.bot_owner_id, Some(111_222_333));
+        assert_eq!(cfg.voice_boost_channel_id, Some(444_555_666));
+
+        let bad_owner = Config::from_lookup(lookup_from(&[
+            ("DISCORD_TOKEN", "bot-token"),
+            ("DATABASE_URL", "postgres://localhost/urbaniac"),
+            ("BOT_OWNER_ID", "not-a-number"),
+        ]))
+        .unwrap_err();
+        assert!(bad_owner.to_string().contains("BOT_OWNER_ID"));
+
+        let bad_vc = Config::from_lookup(lookup_from(&[
+            ("DISCORD_TOKEN", "bot-token"),
+            ("DATABASE_URL", "postgres://localhost/urbaniac"),
+            ("VOICE_BOOST_CHANNEL_ID", "bad-vc"),
+        ]))
+        .unwrap_err();
+        assert!(bad_vc.to_string().contains("VOICE_BOOST_CHANNEL_ID"));
     }
 }

@@ -17,8 +17,8 @@ pub const COLOR_INFRASTRUCTURE: u32 = 0x87939C;
 pub const COLOR_INVENTORY: u32 = 0xA87955;
 pub const COLOR_SYSTEM: u32 = 0x28354A;
 
-pub const BANNER_FILENAME: &str = "banner.jpg";
-const BANNER_BYTES: &[u8] = include_bytes!("../../assets/banner.jpg");
+pub const BANNER_FILENAME: &str = "banner.png";
+const BANNER_BYTES: &[u8] = include_bytes!("../../assets/banner.png");
 
 /// Creates a base embed with Urbaniac's brand color, footer, and timestamp.
 pub fn styled_embed(color: u32) -> CreateEmbed {

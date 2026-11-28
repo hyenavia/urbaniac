@@ -1,6 +1,7 @@
 use crate::application::economy::{self, SaleOutcome, SellError, SellQty};
+use crate::application::giveaway::{self, EnterOutcome};
 use crate::application::{activities, city, crafting, crew, inventory, market, player};
-use crate::bot::{commands, components, embeds, i18n_errors, AppState};
+use crate::bot::{commands, components, embeds, giveaway_ui, i18n_errors, AppState};
 use crate::domain::activities::ActivityKind;
 use crate::domain::city::ProjectId;
 use crate::domain::crafting::{find_recipe, max_craftable_batches};
@@ -19,10 +20,15 @@ pub async fn handle_command(
     cmd: &CommandInteraction,
     app: &AppState,
 ) -> anyhow::Result<()> {
+    if cmd.data.kind == CommandType::PrimaryEntryPoint {
+        cmd.create_response(&ctx.http, CreateInteractionResponse::LaunchActivity)
+            .await?;
+        return Ok(());
+    }
     match cmd.data.name.as_str() {
-        "start" => commands::start::run(ctx, cmd, app).await,
         "help" => commands::help::run(ctx, cmd, app).await,
-        "host" => commands::host::run(ctx, cmd, app).await,
+        "setup" => commands::setup::run(ctx, cmd, app).await,
+        "giveaway" => commands::giveaway::run(ctx, cmd, app).await,
         other => {
             tracing::warn!(command = other, "command tidak dikenal");
             Ok(())
@@ -148,32 +154,26 @@ async fn run_craft_batch_note(
     batch_qty: i64,
     lang: Lang,
 ) -> anyhow::Result<String> {
-    match crafting::start_craft_batch(
+    let voice_spd = app.voice_boost.speed_bonus_pct(id);
+    match crafting::start_craft_batch_with_bonus(
         &app.pool,
         id,
         recipe_id,
         batch_qty,
         app.activity_duration_pct,
+        voice_spd,
     )
     .await
     {
         Ok(run) => {
             app.notify.notify_one();
             let r_name = recipe_name(run.recipe.id, lang);
-            Ok(match lang {
-                Lang::En => format!(
-                    "Crafting **{} × {}** started — finishes <t:{}:R>.",
-                    r_name,
-                    run.quantity,
-                    run.ends_at.timestamp()
-                ),
-                Lang::Id => format!(
-                    "Crafting **{} × {}** dimulai — selesai <t:{}:R>.",
-                    r_name,
-                    run.quantity,
-                    run.ends_at.timestamp()
-                ),
-            })
+            Ok(format!(
+                "Crafting **{} × {}** started — finishes <t:{}:R>.",
+                r_name,
+                run.quantity,
+                run.ends_at.timestamp()
+            ))
         }
         Err(crafting::CraftError::Db(e)) => Err(e.into()),
         Err(crafting::CraftError::Wallet(e)) => Err(e.into()),
@@ -224,7 +224,10 @@ async fn handle_play_button(
 
     let msg = CreateMessage::new()
         .content(format!("<@{}>", uid.get()))
-        .embed(embeds::welcome(&profile, created, lang))
+        .embed(embeds::with_voice_boost(
+            embeds::welcome(&profile, created, lang),
+            app.voice_boost.is_boosted(pid),
+        ))
         .components(components::profile_menu(uid.get(), lang));
 
     if let Some(tid) = player::get_thread_id(&app.pool, pid).await? {
@@ -266,60 +269,84 @@ pub async fn handle_component(
     if action == "play" && owner == 0 {
         return handle_play_button(ctx, c, app).await;
     }
+    if action == "launch" && owner == 0 {
+        c.create_response(&ctx.http, CreateInteractionResponse::LaunchActivity)
+            .await?;
+        return Ok(());
+    }
+    if action == "gwjoin" && owner == 0 {
+        let Ok(giveaway_id) = rest.parse::<i64>() else {
+            return Ok(());
+        };
+        return match giveaway::enter_giveaway(&app.pool, giveaway_id, c.user.id.get() as i64).await? {
+            EnterOutcome::Entered { giveaway, total_entries } => {
+                let msg = CreateInteractionResponseMessage::new()
+                    .embed(giveaway_ui::giveaway_active_embed(&giveaway, total_entries))
+                    .components(giveaway_ui::giveaway_join_button(giveaway.id, total_entries, false));
+                c.create_response(&ctx.http, CreateInteractionResponse::UpdateMessage(msg))
+                    .await?;
+                let _ = c
+                    .create_followup(
+                        &ctx.http,
+                        CreateInteractionResponseFollowup::new()
+                            .content(format!("🎉 You've entered **Giveaway #{}**! Good luck!", giveaway.id))
+                            .ephemeral(true),
+                    )
+                    .await;
+                Ok(())
+            }
+            EnterOutcome::AlreadyEntered { total_entries } => {
+                deny(
+                    ctx,
+                    c,
+                    &format!("You are already entered in this giveaway! (Total entries: {total_entries})"),
+                )
+                .await
+            }
+            EnterOutcome::NeedsProfile => {
+                deny(
+                    ctx,
+                    c,
+                    "You need an Urbaniac profile before joining this giveaway! Click **Play** or open the **Urbaniac Activity**, then try again.",
+                )
+                .await
+            }
+            EnterOutcome::Ended => {
+                deny(ctx, c, "This giveaway has already ended.").await
+            }
+            EnterOutcome::NotFound => {
+                deny(ctx, c, "Giveaway not found.").await
+            }
+        };
+    }
     // Validasi pemilik data.
     if c.user.id.get() != owner {
         return deny(
             ctx,
             c,
-            "This menu belongs to another player. Run `/start` or click **Play** for your own menu.",
+            "This menu belongs to another player. Click **Play** or open the **Urbaniac Activity** for your own menu.",
         )
         .await;
     }
     let id = owner as i64;
     let Some(pl) = player::get_player(&app.pool, id).await? else {
-        return deny(ctx, c, "No profile yet. Run `/start` or click **Play**.").await;
+        return deny(ctx, c, "No profile yet. Click **Play** or open the **Urbaniac Activity**.").await;
     };
     let lang = pl.language();
 
     match action {
-        "lang" => {
-            let new_lang = player::toggle_lang(&app.pool, id).await?;
+        "lang" | "profile" => {
             let Some(profile) = player::get_player_profile(&app.pool, id).await? else {
-                return deny(
-                    ctx,
-                    c,
-                    match new_lang {
-                        Lang::En => "No profile yet. Run `/start`.",
-                        Lang::Id => "Profil belum ada. Jalankan `/start`.",
-                    },
-                )
-                .await;
+                return deny(ctx, c, "No profile yet. Click **Play** or open the **Urbaniac Activity**.").await;
             };
             update(
                 ctx,
                 c,
-                embeds::profile(&profile, new_lang),
-                components::profile_menu(owner, new_lang),
-            )
-            .await
-        }
-        "profile" => {
-            let Some(profile) = player::get_player_profile(&app.pool, id).await? else {
-                return deny(
-                    ctx,
-                    c,
-                    match lang {
-                        Lang::En => "No profile yet. Run `/start`.",
-                        Lang::Id => "Profil belum ada. Jalankan `/start`.",
-                    },
-                )
-                .await;
-            };
-            update(
-                ctx,
-                c,
-                embeds::profile(&profile, lang),
-                components::profile_menu(owner, lang),
+                embeds::with_voice_boost(
+                    embeds::profile(&profile, lang),
+                    app.voice_boost.is_boosted(id),
+                ),
+                components::main_menu(owner, lang),
             )
             .await
         }
@@ -347,31 +374,19 @@ pub async fn handle_component(
         "claim" => {
             let results = inventory::claim_pending(&app.pool, id).await?;
             let note = if results.is_empty() {
-                match lang {
-                    Lang::En => "No Pending Claims.".to_string(),
-                    Lang::Id => "Tidak ada Pending Claim.".to_string(),
-                }
+                "No Pending Claims.".to_string()
             } else {
                 results
                     .iter()
                     .map(|r| {
                         let name = item_name(&r.item_id, lang);
                         if r.remaining == 0 {
-                            match lang {
-                                Lang::En => format!("{name}: {} claimed", r.claimed),
-                                Lang::Id => format!("{name}: {} diklaim", r.claimed),
-                            }
+                            format!("{name}: {} claimed", r.claimed)
                         } else {
-                            match lang {
-                                Lang::En => format!(
-                                    "{name}: {} claimed, {} still pending (inventory full)",
-                                    r.claimed, r.remaining
-                                ),
-                                Lang::Id => format!(
-                                    "{name}: {} diklaim, {} masih pending (inventory penuh)",
-                                    r.claimed, r.remaining
-                                ),
-                            }
+                            format!(
+                                "{name}: {} claimed, {} still pending (inventory full)",
+                                r.claimed, r.remaining
+                            )
                         }
                     })
                     .collect::<Vec<_>>()
@@ -391,14 +406,20 @@ pub async fn handle_component(
         "activities" => show_activities(ctx, c, app, id, lang, None).await,
         "startact" => {
             let Some(kind) = ActivityKind::parse(rest) else { return Ok(()) };
-            let note = match activities::start(&app.pool, id, kind, app.activity_duration_pct).await {
+            let voice_spd = app.voice_boost.speed_bonus_pct(id);
+            let note = match activities::start_with_bonus(
+                &app.pool,
+                id,
+                kind,
+                app.activity_duration_pct,
+                voice_spd,
+            )
+            .await
+            {
                 Ok(run) => {
                     app.notify.notify_one(); // bangunkan scheduler
                     let a_name = activity_name(kind, lang);
-                    match lang {
-                        Lang::En => format!("{a_name} started — finishes <t:{}:R>.", run.ends_at.timestamp()),
-                        Lang::Id => format!("{a_name} dimulai — selesai <t:{}:R>.", run.ends_at.timestamp()),
-                    }
+                    format!("{a_name} started — finishes <t:{}:R>.", run.ends_at.timestamp())
                 }
                 Err(activities::ActivityError::Db(e)) => return Err(e.into()),
                 Err(e) => i18n_errors::activity_error(&e, lang),
@@ -406,7 +427,8 @@ pub async fn handle_component(
             show_activities(ctx, c, app, id, lang, Some(note)).await
         }
         "collect" => {
-            let sums = activities::collect_ready(&app.pool, id).await?;
+            let xp_bonus = app.voice_boost.xp_bonus_pct(id);
+            let sums = activities::collect_ready_with_xp_bonus(&app.pool, id, xp_bonus).await?;
             show_activities(ctx, c, app, id, lang, Some(embeds::claim_note(&sums, lang))).await
         }
         "city" => show_city(ctx, c, app, id, lang, None).await,
@@ -425,10 +447,7 @@ pub async fn handle_component(
                 Ok(run) => {
                     app.notify.notify_one();
                     let p_name = project_name(proj, lang);
-                    match lang {
-                        Lang::En => format!("Project {p_name} started — finishes <t:{}:R>.", run.ends_at.timestamp()),
-                        Lang::Id => format!("Proyek {p_name} dimulai — selesai <t:{}:R>.", run.ends_at.timestamp()),
-                    }
+                    format!("Project {p_name} started — finishes <t:{}:R>.", run.ends_at.timestamp())
                 }
                 Err(city::CityError::Db(e)) => return Err(e.into()),
                 Err(city::CityError::Wallet(e)) => return Err(e.into()),
@@ -455,20 +474,12 @@ pub async fn handle_component(
             let amount = Decimal::new(bac * 100, 2);
             let key = format!("citydep:{}", c.id.get());
             let note = match city::deposit_to_treasury(&app.pool, id, amount, &key).await {
-                Ok((wallet, treasury)) => match lang {
-                    Lang::En => format!(
-                        "Deposited {} into City Treasury. Treasury: {}, Wallet: {}.",
-                        format_bac(amount),
-                        format_bac(treasury),
-                        format_bac(wallet)
-                    ),
-                    Lang::Id => format!(
-                        "Berhasil setor {} ke City Treasury. Treasury: {}, Wallet: {}.",
-                        format_bac(amount),
-                        format_bac(treasury),
-                        format_bac(wallet)
-                    ),
-                },
+                Ok((wallet, treasury)) => format!(
+                    "Deposited {} into City Treasury. Treasury: {}, Wallet: {}.",
+                    format_bac(amount),
+                    format_bac(treasury),
+                    format_bac(wallet)
+                ),
                 Err(city::CityError::Db(e)) => return Err(e.into()),
                 Err(city::CityError::Wallet(e)) => return Err(e.into()),
                 Err(e) => i18n_errors::city_error(&e, lang),
@@ -478,10 +489,7 @@ pub async fn handle_component(
         "citytax" => {
             let Ok(pct) = rest.parse::<i32>() else { return Ok(()) };
             let note = match city::set_tax_rate(&app.pool, id, pct).await {
-                Ok(new_pct) => match lang {
-                    Lang::En => format!("Resident tax rate set to **{}%**.", new_pct),
-                    Lang::Id => format!("Tarif pajak warga diatur ke **{}%**.", new_pct),
-                },
+                Ok(new_pct) => format!("Resident tax rate set to **{}%**.", new_pct),
                 Err(city::CityError::Db(e)) => return Err(e.into()),
                 Err(city::CityError::Wallet(e)) => return Err(e.into()),
                 Err(e) => i18n_errors::city_error(&e, lang),
@@ -491,14 +499,10 @@ pub async fn handle_component(
         "sell" => {
             let v = inventory::view(&app.pool, id).await?;
             if v.lines.is_empty() {
-                let (title, body) = match lang {
-                    Lang::En => ("Sell to NPC", "Your inventory is empty, nothing to sell yet."),
-                    Lang::Id => ("Jual ke NPC", "Inventory kosong, belum ada yang bisa dijual."),
-                };
                 return update(
                     ctx,
                     c,
-                    embeds::notice(title, body),
+                    embeds::notice("Sell to NPC", "Your inventory is empty, nothing to sell yet."),
                     components::main_menu(owner, lang),
                 )
                 .await;
@@ -548,14 +552,10 @@ pub async fn handle_component(
                 .map(|l| l.quantity)
                 .unwrap_or(0);
             if owned <= 0 {
-                let (title, msg) = match lang {
-                    Lang::En => ("Sell to NPC", "You no longer have this item in your inventory."),
-                    Lang::Id => ("Jual ke NPC", "Item ini sudah tidak ada di inventory kamu."),
-                };
                 return update(
                     ctx,
                     c,
-                    embeds::notice(title, msg),
+                    embeds::notice("Sell to NPC", "You no longer have this item in your inventory."),
                     components::main_menu(owner, lang),
                 )
                 .await;
@@ -573,25 +573,25 @@ pub async fn handle_component(
         "mktnew" => {
             let v = inventory::view(&app.pool, id).await?;
             if v.lines.is_empty() {
-                let msg = match lang {
-                    Lang::En => "Inventory is empty, no items to consign to the Broker.",
-                    Lang::Id => "Inventory kosong, tidak ada item untuk dititipkan ke Makelar.",
-                };
-                return show_market(ctx, c, app, id, lang, Some(msg.to_string())).await;
+                return show_market(
+                    ctx,
+                    c,
+                    app,
+                    id,
+                    lang,
+                    Some("Inventory is empty, no items to consign to the Broker.".to_string()),
+                )
+                .await;
             }
             let items: Vec<(String, String, i64)> = v
                 .lines
                 .iter()
                 .map(|l| (item_name(l.item.id, lang).to_string(), l.item.id.to_string(), l.quantity))
                 .collect();
-            let (title, body) = match lang {
-                Lang::En => ("List with Broker", "Select an item from your inventory to consign."),
-                Lang::Id => ("Titip ke Makelar", "Pilih item dari inventory yang ingin dititipkan."),
-            };
             update(
                 ctx,
                 c,
-                embeds::notice(title, body),
+                embeds::notice("List with Broker", "Select an item from your inventory to consign."),
                 components::broker_item_select(owner, &items, lang),
             )
             .await
@@ -610,30 +610,23 @@ pub async fn handle_component(
                 .map(|l| l.quantity)
                 .unwrap_or(0);
             if owned <= 0 {
-                let msg = match lang {
-                    Lang::En => "You no longer have this item in your inventory.",
-                    Lang::Id => "Item ini sudah tidak ada di inventory kamu.",
-                };
-                return show_market(ctx, c, app, id, lang, Some(msg.to_string())).await;
+                return show_market(
+                    ctx,
+                    c,
+                    app,
+                    id,
+                    lang,
+                    Some("You no longer have this item in your inventory.".to_string()),
+                )
+                .await;
             }
             let cur_price = market::current_npc_price(&app.pool, item).await?;
             let it_name = item_name(item.id, lang);
-            let (title, body) = match lang {
-                Lang::En => (
-                    format!("Consign {it_name} to Broker"),
-                    format!(
-                        "You own **{owned}**. Current market price: {}/unit.\nChoose how many to list:",
-                        format_bac(cur_price)
-                    ),
-                ),
-                Lang::Id => (
-                    format!("Titip {it_name} ke Makelar"),
-                    format!(
-                        "Kamu punya **{owned}**. Harga pasar saat ini: {}/unit.\nPilih jumlah yang ingin dititipkan:",
-                        format_bac(cur_price)
-                    ),
-                ),
-            };
+            let title = format!("Consign {it_name} to Broker");
+            let body = format!(
+                "You own **{owned}**. Current market price: {}/unit.\nChoose how many to list:",
+                format_bac(cur_price)
+            );
             update(
                 ctx,
                 c,
@@ -654,54 +647,28 @@ pub async fn handle_component(
             let (_, _, net120) = calc_sale_settlement(p120, qty);
             let (_, _, net135) = calc_sale_settlement(p135, qty);
             let it_name = item_name(item.id, lang);
-            let (title, desc) = match lang {
-                Lang::En => (
-                    "Choose Target Price & Duration",
-                    format!(
-                        "Item: **{} × {}**\nCurrent market price: {}/unit\n\n\
-                         • **+10% (2 Hrs)**: target {}/unit (fee {}, net ~{})\n\
-                         • **+20% (6 Hrs)**: target {}/unit (fee {}, net ~{})\n\
-                         • **+35% (24 Hrs)**: target {}/unit (fee {}, net ~{})",
-                        it_name,
-                        qty,
-                        format_bac(cur_price),
-                        format_bac(p110),
-                        format_bac(calc_listing_fee(p110, qty)),
-                        format_bac(net110),
-                        format_bac(p120),
-                        format_bac(calc_listing_fee(p120, qty)),
-                        format_bac(net120),
-                        format_bac(p135),
-                        format_bac(calc_listing_fee(p135, qty)),
-                        format_bac(net135),
-                    ),
-                ),
-                Lang::Id => (
-                    "Pilih Target Harga & Durasi",
-                    format!(
-                        "Item: **{} × {}**\nHarga pasar sekarang: {}/unit\n\n\
-                         • **+10% (2 Jam)**: target {}/unit (fee {}, bersih ~{})\n\
-                         • **+20% (6 Jam)**: target {}/unit (fee {}, bersih ~{})\n\
-                         • **+35% (24 Jam)**: target {}/unit (fee {}, bersih ~{})",
-                        it_name,
-                        qty,
-                        format_bac(cur_price),
-                        format_bac(p110),
-                        format_bac(calc_listing_fee(p110, qty)),
-                        format_bac(net110),
-                        format_bac(p120),
-                        format_bac(calc_listing_fee(p120, qty)),
-                        format_bac(net120),
-                        format_bac(p135),
-                        format_bac(calc_listing_fee(p135, qty)),
-                        format_bac(net135),
-                    ),
-                ),
-            };
+            let desc = format!(
+                "Item: **{} × {}**\nCurrent market price: {}/unit\n\n\
+                 • **+10% (2 Hrs)**: target {}/unit (fee {}, net ~{})\n\
+                 • **+20% (6 Hrs)**: target {}/unit (fee {}, net ~{})\n\
+                 • **+35% (24 Hrs)**: target {}/unit (fee {}, net ~{})",
+                it_name,
+                qty,
+                format_bac(cur_price),
+                format_bac(p110),
+                format_bac(calc_listing_fee(p110, qty)),
+                format_bac(net110),
+                format_bac(p120),
+                format_bac(calc_listing_fee(p120, qty)),
+                format_bac(net120),
+                format_bac(p135),
+                format_bac(calc_listing_fee(p135, qty)),
+                format_bac(net135),
+            );
             update(
                 ctx,
                 c,
-                embeds::notice(title, &desc),
+                embeds::notice("Choose Target Price & Duration", &desc),
                 components::broker_terms_select(owner, item.id, qty, lang),
             )
             .await
@@ -734,26 +701,15 @@ pub async fn handle_component(
                 Ok(l) => {
                     app.notify.notify_one();
                     let it_name = item_name(l.item.id, lang);
-                    match lang {
-                        Lang::En => format!(
-                            "Listing #{} created: **{} × {}** target {}/unit (fee {}, expires <t:{}:R>).",
-                            l.id,
-                            it_name,
-                            l.quantity,
-                            format_bac(l.target_unit_price),
-                            format_bac(l.listing_fee),
-                            l.expires_at.timestamp()
-                        ),
-                        Lang::Id => format!(
-                            "Listing #{} dibuat: **{} × {}** target {}/unit (fee {}, habis <t:{}:R>).",
-                            l.id,
-                            it_name,
-                            l.quantity,
-                            format_bac(l.target_unit_price),
-                            format_bac(l.listing_fee),
-                            l.expires_at.timestamp()
-                        ),
-                    }
+                    format!(
+                        "Listing #{} created: **{} × {}** target {}/unit (fee {}, expires <t:{}:R>).",
+                        l.id,
+                        it_name,
+                        l.quantity,
+                        format_bac(l.target_unit_price),
+                        format_bac(l.listing_fee),
+                        l.expires_at.timestamp()
+                    )
                 }
                 Err(market::MarketError::Db(e)) => return Err(e.into()),
                 Err(market::MarketError::Wallet(e)) => return Err(e.into()),
@@ -764,11 +720,10 @@ pub async fn handle_component(
         "craft" => show_craft(ctx, c, app, id, lang, None).await,
         "craftauto" => {
             let on = crafting::toggle_auto_sell(&app.pool, id).await?;
-            let note = match (on, lang) {
-                (true, Lang::En) => "Auto-Sell for crafted items enabled.",
-                (false, Lang::En) => "Auto-Sell for crafted items disabled.",
-                (true, Lang::Id) => "Auto-Sell hasil craft diaktifkan.",
-                (false, Lang::Id) => "Auto-Sell hasil craft dimatikan.",
+            let note = if on {
+                "Auto-Sell for crafted items enabled."
+            } else {
+                "Auto-Sell for crafted items disabled."
             };
             show_craft(ctx, c, app, id, lang, Some(note.to_string())).await
         }
@@ -819,11 +774,7 @@ pub async fn handle_component(
         "orderpick" => {
             let ov = crafting::overview(&app.pool, id).await?;
             if ov.orders.is_empty() {
-                let msg = match lang {
-                    Lang::En => "No active orders.",
-                    Lang::Id => "Tidak ada pesanan aktif.",
-                };
-                return show_craft(ctx, c, app, id, lang, Some(msg.to_string())).await;
+                return show_craft(ctx, c, app, id, lang, Some("No active orders.".to_string())).await;
             }
             let items: Vec<(i64, String)> = ov
                 .orders
@@ -841,14 +792,10 @@ pub async fn handle_component(
                     )
                 })
                 .collect();
-            let (title, body) = match lang {
-                Lang::En => ("Fulfill NPC Order", "Select an order to deliver."),
-                Lang::Id => ("Penuhi Pesanan NPC", "Pilih pesanan yang ingin diserahkan."),
-            };
             update(
                 ctx,
                 c,
-                embeds::notice(title, body),
+                embeds::notice("Fulfill NPC Order", "Select an order to deliver."),
                 components::order_select(owner, &items, lang),
             )
             .await
@@ -859,37 +806,24 @@ pub async fn handle_component(
                 _ => None,
             };
             let Some(order_id) = picked.and_then(|s| s.parse::<i64>().ok()) else { return Ok(()) };
-            let note = match crafting::fulfill_order(&app.pool, id, order_id).await {
+            let xp_bonus = app.voice_boost.xp_bonus_pct(id);
+            let note = match crafting::fulfill_order_with_xp_bonus(&app.pool, id, order_id, xp_bonus).await {
                 Ok(s) => {
                     let it_name = item_name(s.item.id, lang);
                     let lvl = if s.new_rep_level > s.old_rep_level {
-                        match lang {
-                            Lang::En => format!(" — Reputation rose to Lv {}!", s.new_rep_level),
-                            Lang::Id => format!(" — Reputasi naik ke Lv {}!", s.new_rep_level),
-                        }
+                        format!(" — Reputation rose to Lv {}!", s.new_rep_level)
                     } else {
                         String::new()
                     };
-                    match lang {
-                        Lang::En => format!(
-                            "Order #{} (**{} × {}**) fulfilled! Reward {} + {} Rep XP{}.",
-                            order_id,
-                            it_name,
-                            s.quantity,
-                            format_bac(s.reward_bac),
-                            s.rep_xp_gain,
-                            lvl
-                        ),
-                        Lang::Id => format!(
-                            "Pesanan #{} (**{} × {}**) selesai! Hadiah {} + {} Rep XP{}.",
-                            order_id,
-                            it_name,
-                            s.quantity,
-                            format_bac(s.reward_bac),
-                            s.rep_xp_gain,
-                            lvl
-                        ),
-                    }
+                    format!(
+                        "Order #{} (**{} × {}**) fulfilled! Reward {} + {} Rep XP{}.",
+                        order_id,
+                        it_name,
+                        s.quantity,
+                        format_bac(s.reward_bac),
+                        s.rep_xp_gain,
+                        lvl
+                    )
                 }
                 Err(crafting::CraftError::Db(e)) => return Err(e.into()),
                 Err(crafting::CraftError::Wallet(e)) => return Err(e.into()),
@@ -899,10 +833,7 @@ pub async fn handle_component(
         }
         "orderrefresh" => {
             let note = match crafting::refresh_orders(&app.pool, id).await {
-                Ok(()) => match lang {
-                    Lang::En => "Loaded 3 new NPC orders!".to_string(),
-                    Lang::Id => "3 pesanan NPC baru berhasil dimuat!".to_string(),
-                },
+                Ok(()) => "Loaded 3 new NPC orders!".to_string(),
                 Err(crafting::CraftError::Db(e)) => return Err(e.into()),
                 Err(crafting::CraftError::Wallet(e)) => return Err(e.into()),
                 Err(e) => i18n_errors::craft_error(&e, lang),
@@ -915,10 +846,7 @@ pub async fn handle_component(
             let note = match crew::recruit(&app.pool, id, &key).await {
                 Ok(cw) => {
                     let spec = activity_name(cw.specialty, lang);
-                    match lang {
-                        Lang::En => format!("Hired **{}** [{}] ({spec} Specialist).", cw.name, cw.rarity),
-                        Lang::Id => format!("Berhasil merekrut **{}** [{}] (Spesialis {spec}).", cw.name, cw.rarity),
-                    }
+                    format!("Hired **{}** [{}] ({spec} Specialist).", cw.name, cw.rarity)
                 }
                 Err(crew::CrewError::Db(e)) => return Err(e.into()),
                 Err(crew::CrewError::Wallet(e)) => return Err(e.into()),
@@ -929,32 +857,20 @@ pub async fn handle_component(
         "crewupg" => {
             let list = crew::list(&app.pool, id).await?;
             if list.is_empty() {
-                let msg = match lang {
-                    Lang::En => "No crew members yet.",
-                    Lang::Id => "Belum ada kru.",
-                };
-                return show_crew(ctx, c, app, id, lang, Some(msg.to_string())).await;
+                return show_crew(ctx, c, app, id, lang, Some("No crew members yet.".to_string())).await;
             }
-            let max_word = match lang {
-                Lang::En => "Max",
-                Lang::Id => "Maks",
-            };
             let items: Vec<(i64, String)> = list
                 .iter()
                 .map(|cw| {
-                    let cost = cw.upgrade_cost.map(format_bac).unwrap_or_else(|| max_word.to_string());
+                    let cost = cw.upgrade_cost.map(format_bac).unwrap_or_else(|| "Max".to_string());
                     (cw.id, format!("#{} {} Lv {} ({})", cw.id, cw.name, cw.level, cost))
                 })
                 .collect();
-            let (title, body, ph) = match lang {
-                Lang::En => ("Upgrade Crew", "Select a crew member to upgrade.", "Select crew"),
-                Lang::Id => ("Upgrade Kru", "Pilih kru yang ingin di-upgrade.", "Pilih kru"),
-            };
             update(
                 ctx,
                 c,
-                embeds::notice(title, body),
-                components::crew_select(owner, "crewupgpick", &items, ph, lang),
+                embeds::notice("Upgrade Crew", "Select a crew member to upgrade."),
+                components::crew_select(owner, "crewupgpick", &items, "Select crew", lang),
             )
             .await
         }
@@ -966,10 +882,7 @@ pub async fn handle_component(
             let Some(crew_id) = picked.and_then(|s| s.parse::<i64>().ok()) else { return Ok(()) };
             let key = format!("crewupg:{}", c.id.get());
             let note = match crew::upgrade(&app.pool, id, crew_id, &key).await {
-                Ok(cw) => match lang {
-                    Lang::En => format!("**{}** upgraded to Lv {}!", cw.name, cw.level),
-                    Lang::Id => format!("**{}** naik ke Lv {}!", cw.name, cw.level),
-                },
+                Ok(cw) => format!("**{}** upgraded to Lv {}!", cw.name, cw.level),
                 Err(crew::CrewError::Db(e)) => return Err(e.into()),
                 Err(crew::CrewError::Wallet(e)) => return Err(e.into()),
                 Err(e) => i18n_errors::crew_error(&e, lang),
@@ -979,25 +892,17 @@ pub async fn handle_component(
         "crewassign" => {
             let list = crew::list(&app.pool, id).await?;
             if list.is_empty() {
-                let msg = match lang {
-                    Lang::En => "No crew members yet.",
-                    Lang::Id => "Belum ada kru.",
-                };
-                return show_crew(ctx, c, app, id, lang, Some(msg.to_string())).await;
+                return show_crew(ctx, c, app, id, lang, Some("No crew members yet.".to_string())).await;
             }
             let items: Vec<(i64, String)> = list
                 .iter()
                 .map(|cw| (cw.id, format!("#{} {} [{} Lv {}]", cw.id, cw.name, cw.rarity, cw.level)))
                 .collect();
-            let (title, body, ph) = match lang {
-                Lang::En => ("Assign Crew", "Select a crew member to assign to an activity.", "Select crew"),
-                Lang::Id => ("Tugaskan Kru", "Pilih kru untuk ditugaskan ke aktivitas.", "Pilih kru"),
-            };
             update(
                 ctx,
                 c,
-                embeds::notice(title, body),
-                components::crew_select(owner, "crewassignpick", &items, ph, lang),
+                embeds::notice("Assign Crew", "Select a crew member to assign to an activity."),
+                components::crew_select(owner, "crewassignpick", &items, "Select crew", lang),
             )
             .await
         }
@@ -1008,14 +913,13 @@ pub async fn handle_component(
             };
             let Some(crew_id) = picked.and_then(|s| s.parse::<i64>().ok()) else { return Ok(()) };
             let stage = city::stage_for(&app.pool, id).await?;
-            let (title, body) = match lang {
-                Lang::En => ("Choose Activity Assignment", "Select an activity and automation mode for this crew member."),
-                Lang::Id => ("Pilih Tugas Aktivitas", "Pilih aktivitas dan mode otomasi untuk kru ini."),
-            };
             update(
                 ctx,
                 c,
-                embeds::notice(title, body),
+                embeds::notice(
+                    "Choose Activity Assignment",
+                    "Select an activity and automation mode for this crew member.",
+                ),
                 components::crew_assign_activity(owner, crew_id, stage, lang),
             )
             .await
@@ -1032,26 +936,29 @@ pub async fn handle_component(
                 Ok(cw) => match cw.assigned {
                     Some(a) if cw.auto_enabled => {
                         let a_name = activity_name(a, lang);
-                        let mut base = match lang {
-                            Lang::En => format!("**{}** assigned to {a_name} (AUTO).", cw.name),
-                            Lang::Id => format!("**{}** ditugaskan ke {a_name} (AUTO).", cw.name),
-                        };
+                        let mut base = format!("**{}** assigned to {a_name} (AUTO).", cw.name);
                         if !activities::has_active_kind(&app.pool, id, a).await? {
-                            match activities::start(&app.pool, id, a, app.activity_duration_pct).await {
+                            let voice_spd = app.voice_boost.speed_bonus_pct(id);
+                            match activities::start_with_bonus(
+                                &app.pool,
+                                id,
+                                a,
+                                app.activity_duration_pct,
+                                voice_spd,
+                            )
+                            .await
+                            {
                                 Ok(run) => {
                                     app.notify.notify_one();
-                                    let extra = match lang {
-                                        Lang::En => format!(" Started {a_name} automatically — finishes <t:{}:R>.", run.ends_at.timestamp()),
-                                        Lang::Id => format!(" {a_name} langsung dimulai otomatis — selesai <t:{}:R>.", run.ends_at.timestamp()),
-                                    };
-                                    base.push_str(&extra);
+                                    base.push_str(&format!(
+                                        " Started {a_name} automatically — finishes <t:{}:R>.",
+                                        run.ends_at.timestamp()
+                                    ));
                                 }
                                 Err(activities::ActivityError::NoFreeSlot(_)) => {
-                                    let extra = match lang {
-                                        Lang::En => " All Activity Slots are currently busy — AUTO will loop once a slot runs it.",
-                                        Lang::Id => " Semua Slot Aktivitas sedang terpakai — AUTO akan mengulang otomatis setelah slot tersedia.",
-                                    };
-                                    base.push_str(extra);
+                                    base.push_str(
+                                        " All Activity Slots are currently busy — AUTO will loop once a slot runs it.",
+                                    );
                                 }
                                 Err(_) => {}
                             }
@@ -1060,15 +967,9 @@ pub async fn handle_component(
                     }
                     Some(a) => {
                         let a_name = activity_name(a, lang);
-                        match lang {
-                            Lang::En => format!("**{}** assigned to {a_name} (Manual).", cw.name),
-                            Lang::Id => format!("**{}** ditugaskan ke {a_name} (Manual).", cw.name),
-                        }
+                        format!("**{}** assigned to {a_name} (Manual).", cw.name)
                     }
-                    None => match lang {
-                        Lang::En => format!("**{}** unassigned from task.", cw.name),
-                        Lang::Id => format!("**{}** dilepas dari tugas.", cw.name),
-                    },
+                    None => format!("**{}** unassigned from task.", cw.name),
                 },
                 Err(crew::CrewError::Db(e)) => return Err(e.into()),
                 Err(crew::CrewError::Wallet(e)) => return Err(e.into()),
@@ -1079,11 +980,7 @@ pub async fn handle_component(
         "mktcancel" => {
             let ov = market::overview(&app.pool, id).await?;
             if ov.listings.is_empty() {
-                let msg = match lang {
-                    Lang::En => "No active listings.",
-                    Lang::Id => "Tidak ada listing aktif.",
-                };
-                return show_market(ctx, c, app, id, lang, Some(msg.to_string())).await;
+                return show_market(ctx, c, app, id, lang, Some("No active listings.".to_string())).await;
             }
             let items: Vec<(i64, String)> = ov
                 .listings
@@ -1101,14 +998,13 @@ pub async fn handle_component(
                     )
                 })
                 .collect();
-            let (title, body) = match lang {
-                Lang::En => ("Cancel Listing", "Select a listing to cancel (listing fee is non-refundable)."),
-                Lang::Id => ("Batalkan Listing", "Pilih listing yang ingin dibatalkan (fee tidak dikembalikan)."),
-            };
             update(
                 ctx,
                 c,
-                embeds::notice(title, body),
+                embeds::notice(
+                    "Cancel Listing",
+                    "Select a listing to cancel (listing fee is non-refundable).",
+                ),
                 components::broker_cancel_select(owner, &items, lang),
             )
             .await
@@ -1122,29 +1018,17 @@ pub async fn handle_component(
             let note = match market::cancel_listing(&app.pool, id, listing_id).await {
                 Ok((item, stored, pending)) if pending > 0 => {
                     let it_name = item_name(item.id, lang);
-                    match lang {
-                        Lang::En => format!(
-                            "Listing #{} cancelled. {} +{} returned to inventory, {} moved to Pending Claim.",
-                            listing_id, it_name, stored, pending
-                        ),
-                        Lang::Id => format!(
-                            "Listing #{} dibatalkan. {} +{} kembali ke inventory, {} masuk Pending Claim.",
-                            listing_id, it_name, stored, pending
-                        ),
-                    }
+                    format!(
+                        "Listing #{} cancelled. {} +{} returned to inventory, {} moved to Pending Claim.",
+                        listing_id, it_name, stored, pending
+                    )
                 }
                 Ok((item, stored, _)) => {
                     let it_name = item_name(item.id, lang);
-                    match lang {
-                        Lang::En => format!(
-                            "Listing #{} cancelled. {} +{} returned to inventory.",
-                            listing_id, it_name, stored
-                        ),
-                        Lang::Id => format!(
-                            "Listing #{} dibatalkan. {} +{} dikembalikan ke inventory.",
-                            listing_id, it_name, stored
-                        ),
-                    }
+                    format!(
+                        "Listing #{} cancelled. {} +{} returned to inventory.",
+                        listing_id, it_name, stored
+                    )
                 }
                 Err(market::MarketError::Db(e)) => return Err(e.into()),
                 Err(market::MarketError::Wallet(e)) => return Err(e.into()),
@@ -1162,14 +1046,10 @@ pub async fn handle_component(
                 .map(|l| l.quantity)
                 .unwrap_or(0);
             if owned <= 0 {
-                let (title, msg) = match lang {
-                    Lang::En => ("Sell to NPC", "You no longer have this item in your inventory."),
-                    Lang::Id => ("Jual ke NPC", "Item ini sudah tidak ada di inventory kamu."),
-                };
                 return update(
                     ctx,
                     c,
-                    embeds::notice(title, msg),
+                    embeds::notice("Sell to NPC", "You no longer have this item in your inventory."),
                     components::main_menu(owner, lang),
                 )
                 .await;
@@ -1200,45 +1080,23 @@ pub async fn handle_component(
             let text = match economy::sell_to_npc(&app.pool, id, item_id, qty, &key).await {
                 Ok(SaleOutcome::Sold { item, qty, total, balance }) => {
                     let it_name = item_name(item.id, lang);
-                    match lang {
-                        Lang::En => format!(
-                            "Sold {} {} for {}. Balance: {}.",
-                            qty,
-                            it_name,
-                            format_bac(total),
-                            format_bac(balance)
-                        ),
-                        Lang::Id => format!(
-                            "Terjual {} {} seharga {}. Saldo: {}.",
-                            qty,
-                            it_name,
-                            format_bac(total),
-                            format_bac(balance)
-                        ),
-                    }
+                    format!(
+                        "Sold {} {} for {}. Balance: {}.",
+                        qty,
+                        it_name,
+                        format_bac(total),
+                        format_bac(balance)
+                    )
                 }
-                Ok(SaleOutcome::Duplicate) => match lang {
-                    Lang::En => "This sale has already been processed.".to_string(),
-                    Lang::Id => "Penjualan ini sudah diproses.".to_string(),
-                },
+                Ok(SaleOutcome::Duplicate) => "This sale has already been processed.".to_string(),
                 Err(SellError::Db(e)) => return Err(e.into()),
                 Err(SellError::Wallet(e)) => return Err(e.into()),
-                Err(e) => {
-                    let err_txt = i18n_errors::sell_error(&e, lang);
-                    match lang {
-                        Lang::En => format!("Sale failed: {err_txt}"),
-                        Lang::Id => format!("Gagal menjual: {err_txt}"),
-                    }
-                }
-            };
-            let title = match lang {
-                Lang::En => "Sell to NPC",
-                Lang::Id => "Jual ke NPC",
+                Err(e) => format!("Sale failed: {}", i18n_errors::sell_error(&e, lang)),
             };
             update(
                 ctx,
                 c,
-                embeds::notice(title, &text),
+                embeds::notice("Sell to NPC", &text),
                 components::main_menu(owner, lang),
             )
             .await
@@ -1298,39 +1156,29 @@ pub async fn handle_modal(
         return reply_modal_ephemeral(ctx, m, "This modal belongs to another player.").await;
     }
 
+    let lang = Lang::En;
     match action {
         "citydepmodal" => {
             let id = owner as i64;
             let raw = modal_field(m, "amount");
-            let lang = player::get_lang(&app.pool, id).await.unwrap_or(Lang::En);
             let bal = economy::balance(&app.pool, id).await?;
             let note = match parse_amount_or_max(raw, bal) {
                 Some(amount) if amount > Decimal::ZERO => {
                     let key = format!("citydep:{}", m.id.get());
                     match city::deposit_to_treasury(&app.pool, id, amount, &key).await {
-                        Ok((wallet, treasury)) => match lang {
-                            Lang::En => format!(
-                                "Deposited {} into City Treasury. Treasury: {}, Wallet: {}.",
-                                format_bac(amount),
-                                format_bac(treasury),
-                                format_bac(wallet)
-                            ),
-                            Lang::Id => format!(
-                                "Berhasil setor {} ke City Treasury. Treasury: {}, Wallet: {}.",
-                                format_bac(amount),
-                                format_bac(treasury),
-                                format_bac(wallet)
-                            ),
-                        },
+                        Ok((wallet, treasury)) => format!(
+                            "Deposited {} into City Treasury. Treasury: {}, Wallet: {}.",
+                            format_bac(amount),
+                            format_bac(treasury),
+                            format_bac(wallet)
+                        ),
                         Err(city::CityError::Db(e)) => return Err(e.into()),
                         Err(city::CityError::Wallet(e)) => return Err(e.into()),
                         Err(e) => i18n_errors::city_error(&e, lang),
                     }
                 }
-                _ => match lang {
-                    Lang::En => "Invalid deposit amount. Enter a number greater than 0 (or `max`).".to_string(),
-                    Lang::Id => "Jumlah setoran tidak valid. Masukkan angka lebih dari 0 (atau `max`).".to_string(),
-                },
+                _ => "Invalid deposit amount. Enter a number greater than 0 (or `max`)."
+                    .to_string(),
             };
             let (embed, rows) = build_city_view(&app.pool, id, lang, Some(note)).await?;
             let msg = CreateInteractionResponseMessage::new()
@@ -1343,35 +1191,24 @@ pub async fn handle_modal(
         "citywdmodal" => {
             let id = owner as i64;
             let raw = modal_field(m, "amount");
-            let lang = player::get_lang(&app.pool, id).await.unwrap_or(Lang::En);
             let ov = city::overview(&app.pool, id).await?;
             let note = match parse_amount_or_max(raw, ov.treasury) {
                 Some(amount) if amount > Decimal::ZERO => {
                     let key = format!("citywd:{}", m.id.get());
                     match city::withdraw_from_treasury(&app.pool, id, amount, &key).await {
-                        Ok((wallet, treasury)) => match lang {
-                            Lang::En => format!(
-                                "Withdrew {} from City Treasury. Treasury: {}, Wallet: {}.",
-                                format_bac(amount),
-                                format_bac(treasury),
-                                format_bac(wallet)
-                            ),
-                            Lang::Id => format!(
-                                "Berhasil tarik {} dari City Treasury. Treasury: {}, Wallet: {}.",
-                                format_bac(amount),
-                                format_bac(treasury),
-                                format_bac(wallet)
-                            ),
-                        },
+                        Ok((wallet, treasury)) => format!(
+                            "Withdrew {} from City Treasury. Treasury: {}, Wallet: {}.",
+                            format_bac(amount),
+                            format_bac(treasury),
+                            format_bac(wallet)
+                        ),
                         Err(city::CityError::Db(e)) => return Err(e.into()),
                         Err(city::CityError::Wallet(e)) => return Err(e.into()),
                         Err(e) => i18n_errors::city_error(&e, lang),
                     }
                 }
-                _ => match lang {
-                    Lang::En => "Invalid withdraw amount. Enter a number greater than 0 (or `max`).".to_string(),
-                    Lang::Id => "Jumlah penarikan tidak valid. Masukkan angka lebih dari 0 (atau `max`).".to_string(),
-                },
+                _ => "Invalid withdraw amount. Enter a number greater than 0 (or `max`)."
+                    .to_string(),
             };
             let (embed, rows) = build_city_view(&app.pool, id, lang, Some(note)).await?;
             let msg = CreateInteractionResponseMessage::new()
@@ -1385,7 +1222,6 @@ pub async fn handle_modal(
             let id = owner as i64;
             let recipe_id = rest;
             let raw_qty = modal_field(m, "qty");
-            let lang = player::get_lang(&app.pool, id).await.unwrap_or(Lang::En);
             let note = if raw_qty.eq_ignore_ascii_case("max") || raw_qty.eq_ignore_ascii_case("all") {
                 if let Some(recipe) = find_recipe(recipe_id) {
                     let stock = player_stock(&app.pool, id).await?;
@@ -1397,10 +1233,8 @@ pub async fn handle_modal(
             } else {
                 match raw_qty.parse::<i64>() {
                     Ok(n) if n > 0 => run_craft_batch_note(app, id, recipe_id, n, lang).await?,
-                    _ => match lang {
-                        Lang::En => "Invalid quantity. Enter a whole number greater than 0 (or `max`).".to_string(),
-                        Lang::Id => "Jumlah tidak valid. Masukkan angka bulat lebih dari 0 (atau `max`).".to_string(),
-                    },
+                    _ => "Invalid quantity. Enter a whole number greater than 0 (or `max`)."
+                        .to_string(),
                 }
             };
             let (embed, rows) = build_craft_view(&app.pool, id, lang, Some(note)).await?;
@@ -1414,9 +1248,6 @@ pub async fn handle_modal(
         "sellmodal" => {
             let item_id = rest;
             let raw_qty = modal_field(m, "qty");
-            let lang = player::get_lang(&app.pool, owner as i64)
-                .await
-                .unwrap_or(Lang::En);
 
             let text = match raw_qty.parse::<i64>() {
                 Ok(n) if n > 0 => {
@@ -1424,50 +1255,25 @@ pub async fn handle_modal(
                     match economy::sell_to_npc(&app.pool, owner as i64, item_id, SellQty::Exact(n), &key).await {
                         Ok(SaleOutcome::Sold { item, qty, total, balance }) => {
                             let it_name = item_name(item.id, lang);
-                            match lang {
-                                Lang::En => format!(
-                                    "Sold {} {} for {}. Balance: {}.",
-                                    qty,
-                                    it_name,
-                                    format_bac(total),
-                                    format_bac(balance)
-                                ),
-                                Lang::Id => format!(
-                                    "Terjual {} {} seharga {}. Saldo: {}.",
-                                    qty,
-                                    it_name,
-                                    format_bac(total),
-                                    format_bac(balance)
-                                ),
-                            }
+                            format!(
+                                "Sold {} {} for {}. Balance: {}.",
+                                qty,
+                                it_name,
+                                format_bac(total),
+                                format_bac(balance)
+                            )
                         }
-                        Ok(SaleOutcome::Duplicate) => match lang {
-                            Lang::En => "This sale has already been processed.".to_string(),
-                            Lang::Id => "Penjualan ini sudah diproses.".to_string(),
-                        },
+                        Ok(SaleOutcome::Duplicate) => "This sale has already been processed.".to_string(),
                         Err(SellError::Db(e)) => return Err(e.into()),
                         Err(SellError::Wallet(e)) => return Err(e.into()),
-                        Err(e) => {
-                            let err_txt = i18n_errors::sell_error(&e, lang);
-                            match lang {
-                                Lang::En => format!("Sale failed: {err_txt}"),
-                                Lang::Id => format!("Gagal menjual: {err_txt}"),
-                            }
-                        }
+                        Err(e) => format!("Sale failed: {}", i18n_errors::sell_error(&e, lang)),
                     }
                 }
-                _ => match lang {
-                    Lang::En => "Invalid quantity. Enter a whole number greater than 0.".to_string(),
-                    Lang::Id => "Jumlah tidak valid. Masukkan angka bulat lebih dari 0.".to_string(),
-                },
+                _ => "Invalid quantity. Enter a whole number greater than 0.".to_string(),
             };
 
-            let title = match lang {
-                Lang::En => "Sell to NPC",
-                Lang::Id => "Jual ke NPC",
-            };
             let msg = CreateInteractionResponseMessage::new()
-                .embed(embeds::notice(title, &text))
+                .embed(embeds::notice("Sell to NPC", &text))
                 .components(components::main_menu(owner, lang));
             m.create_response(&ctx.http, CreateInteractionResponse::UpdateMessage(msg))
                 .await?;

@@ -40,6 +40,9 @@ pub struct MeResponse {
     pub username: String,
     pub avatar_url: Option<String>,
     pub profile: Option<MeProfileDto>,
+    pub voice_boost_active: bool,
+    pub voice_boost_speed_pct: i64,
+    pub voice_boost_xp_pct: i64,
 }
 
 #[derive(Serialize)]

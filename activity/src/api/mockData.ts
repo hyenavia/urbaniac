@@ -25,7 +25,6 @@ import type {
   ProjectQuoteDto,
   RegisterResponse,
   RunningProjectDto,
-  SetLangResponse,
   SetTaxResponse,
   TreasuryBalanceResponse,
 } from "./types";
@@ -42,35 +41,35 @@ const STAGE_META: Record<
   CityStageKey,
   { name: string; era: string; slots: number; cap: number }
 > = {
-  kampung: { name: "Kampung", era: "Era Desa", slots: 2, cap: 10 },
-  desa: { name: "Desa", era: "Era Desa", slots: 3, cap: 20 },
-  kota_kecil: { name: "Kota Kecil", era: "Era Kota Kecil", slots: 4, cap: 30 },
-  kota_dagang: { name: "Kota Dagang", era: "Era Kota Dagang", slots: 4, cap: 40 },
-  metropolis: { name: "Metropolis", era: "Era Metropolis", slots: 4, cap: 50 },
+  kampung: { name: "Hamlet", era: "Village Era", slots: 2, cap: 10 },
+  desa: { name: "Village", era: "Village Era", slots: 3, cap: 20 },
+  kota_kecil: { name: "Town", era: "Town Era", slots: 4, cap: 30 },
+  kota_dagang: { name: "Trade City", era: "City Era", slots: 4, cap: 40 },
+  metropolis: { name: "Metropolis", era: "Metropolis Era", slots: 4, cap: 50 },
 };
 
 const ITEM_META: Record<
   string,
   { name: string; rarity: string; basePrice: number; npcPrice: string }
 > = {
-  wheat: { name: "Gandum", rarity: "Common", basePrice: 3.0, npcPrice: "3.12" },
-  potato: { name: "Kentang", rarity: "Common", basePrice: 4.0, npcPrice: "4.10" },
-  wood: { name: "Kayu", rarity: "Common", basePrice: 3.0, npcPrice: "2.95" },
-  berries: { name: "Buah Hutan", rarity: "Common", basePrice: 3.5, npcPrice: "3.50" },
-  wild_herb: { name: "Herba Liar", rarity: "Uncommon", basePrice: 12.0, npcPrice: "12.40" },
-  flour: { name: "Tepung Gandum", rarity: "Common", basePrice: 9.5, npcPrice: "9.80" },
-  plank: { name: "Papan Kayu", rarity: "Common", basePrice: 9.5, npcPrice: "10.10" },
-  herb_extract: { name: "Ekstrak Herba", rarity: "Uncommon", basePrice: 40.0, npcPrice: "42.00" },
-  bread: { name: "Roti Kampung", rarity: "Common", basePrice: 28.0, npcPrice: "29.90" },
-  wooden_crate: { name: "Peti Kayu", rarity: "Uncommon", basePrice: 32.0, npcPrice: "34.00" },
-  healing_tonic: { name: "Tonik Herba", rarity: "Rare", basePrice: 68.0, npcPrice: "71.50" },
-  river_fish: { name: "Ikan Sungai", rarity: "Common", basePrice: 5.0, npcPrice: "5.40" },
-  silver_carp: { name: "Gurame Perak", rarity: "Uncommon", basePrice: 16.0, npcPrice: "17.10" },
-  golden_eel: { name: "Belut Emas", rarity: "Rare", basePrice: 45.0, npcPrice: "48.20" },
-  stone: { name: "Batu", rarity: "Common", basePrice: 4.5, npcPrice: "4.50" },
-  iron_ore: { name: "Bijih Besi", rarity: "Uncommon", basePrice: 18.0, npcPrice: "18.90" },
-  amethyst: { name: "Kecubung", rarity: "Rare", basePrice: 60.0, npcPrice: "64.00" },
-  star_crystal: { name: "Kristal Bintang", rarity: "Epic", basePrice: 150.0, npcPrice: "162.50" },
+  wheat: { name: "Wheat", rarity: "Common", basePrice: 3.0, npcPrice: "3.12" },
+  potato: { name: "Potato", rarity: "Common", basePrice: 4.0, npcPrice: "4.10" },
+  wood: { name: "Wood", rarity: "Common", basePrice: 3.0, npcPrice: "2.95" },
+  berries: { name: "Forest Berries", rarity: "Common", basePrice: 3.5, npcPrice: "3.50" },
+  wild_herb: { name: "Wild Herb", rarity: "Uncommon", basePrice: 12.0, npcPrice: "12.40" },
+  flour: { name: "Wheat Flour", rarity: "Common", basePrice: 9.5, npcPrice: "9.80" },
+  plank: { name: "Wood Plank", rarity: "Common", basePrice: 9.5, npcPrice: "10.10" },
+  herb_extract: { name: "Herb Extract", rarity: "Uncommon", basePrice: 40.0, npcPrice: "42.00" },
+  bread: { name: "Village Bread", rarity: "Common", basePrice: 28.0, npcPrice: "29.90" },
+  wooden_crate: { name: "Wooden Crate", rarity: "Uncommon", basePrice: 32.0, npcPrice: "34.00" },
+  healing_tonic: { name: "Herbal Tonic", rarity: "Rare", basePrice: 68.0, npcPrice: "71.50" },
+  river_fish: { name: "River Fish", rarity: "Common", basePrice: 5.0, npcPrice: "5.40" },
+  silver_carp: { name: "Silver Carp", rarity: "Uncommon", basePrice: 16.0, npcPrice: "17.10" },
+  golden_eel: { name: "Golden Eel", rarity: "Rare", basePrice: 45.0, npcPrice: "48.20" },
+  stone: { name: "Stone", rarity: "Common", basePrice: 4.5, npcPrice: "4.50" },
+  iron_ore: { name: "Iron Ore", rarity: "Uncommon", basePrice: 18.0, npcPrice: "18.90" },
+  amethyst: { name: "Amethyst", rarity: "Rare", basePrice: 60.0, npcPrice: "64.00" },
+  star_crystal: { name: "Star Crystal", rarity: "Epic", basePrice: 150.0, npcPrice: "162.50" },
 };
 
 const RECIPE_CATALOG: Array<{
@@ -86,77 +85,77 @@ const RECIPE_CATALOG: Array<{
 }> = [
   {
     id: "flour",
-    name: "Tepung Gandum",
+    name: "Wheat Flour",
     tier: "processed",
-    tier_name: "Olahan",
+    tier_name: "Processed",
     output_item_id: "flour",
     output_qty: 1,
     duration_secs: 12,
     xp_per_unit: 10,
-    inputs: [{ item_id: "wheat", name: "Gandum", need: 2 }],
+    inputs: [{ item_id: "wheat", name: "Wheat", need: 2 }],
   },
   {
     id: "plank",
-    name: "Papan Kayu",
+    name: "Wood Plank",
     tier: "processed",
-    tier_name: "Olahan",
+    tier_name: "Processed",
     output_item_id: "plank",
     output_qty: 1,
     duration_secs: 12,
     xp_per_unit: 10,
-    inputs: [{ item_id: "wood", name: "Kayu", need: 2 }],
+    inputs: [{ item_id: "wood", name: "Wood", need: 2 }],
   },
   {
     id: "herb_extract",
-    name: "Ekstrak Herba",
+    name: "Herb Extract",
     tier: "processed",
-    tier_name: "Olahan",
+    tier_name: "Processed",
     output_item_id: "herb_extract",
     output_qty: 1,
     duration_secs: 15,
     xp_per_unit: 10,
     inputs: [
-      { item_id: "wild_herb", name: "Herba Liar", need: 2 },
-      { item_id: "berries", name: "Buah Hutan", need: 1 },
+      { item_id: "wild_herb", name: "Wild Herb", need: 2 },
+      { item_id: "berries", name: "Forest Berries", need: 1 },
     ],
   },
   {
     id: "bread",
-    name: "Roti Kampung",
+    name: "Village Bread",
     tier: "finished",
-    tier_name: "Produk Jadi",
+    tier_name: "Finished",
     output_item_id: "bread",
     output_qty: 1,
     duration_secs: 18,
     xp_per_unit: 20,
-    inputs: [{ item_id: "flour", name: "Tepung Gandum", need: 2 }],
+    inputs: [{ item_id: "flour", name: "Wheat Flour", need: 2 }],
   },
   {
     id: "wooden_crate",
-    name: "Peti Kayu",
+    name: "Wooden Crate",
     tier: "finished",
-    tier_name: "Produk Jadi",
+    tier_name: "Finished",
     output_item_id: "wooden_crate",
     output_qty: 1,
     duration_secs: 18,
     xp_per_unit: 20,
     inputs: [
-      { item_id: "plank", name: "Papan Kayu", need: 2 },
-      { item_id: "wood", name: "Kayu", need: 1 },
+      { item_id: "plank", name: "Wood Plank", need: 2 },
+      { item_id: "wood", name: "Wood", need: 1 },
     ],
   },
   {
     id: "healing_tonic",
-    name: "Tonik Herba",
+    name: "Herbal Tonic",
     tier: "finished",
-    tier_name: "Produk Jadi",
+    tier_name: "Finished",
     output_item_id: "healing_tonic",
     output_qty: 1,
     duration_secs: 20,
     xp_per_unit: 20,
     inputs: [
-      { item_id: "herb_extract", name: "Ekstrak Herba", need: 1 },
-      { item_id: "berries", name: "Buah Hutan", need: 2 },
+      { item_id: "herb_extract", name: "Herb Extract", need: 1 },
+      { item_id: "berries", name: "Forest Berries", need: 2 },
     ],
   },
 ];
@@ -209,102 +208,102 @@ function buildQuotes(
   }> = [
     {
       project: "well",
-      name: "Sumur",
-      description: "Bonus +10% yield Farming & Gathering. Prasyarat Balai Kampung.",
+      name: "Well",
+      description: "+10% Farming & Gathering yield bonus. Prerequisite for Village Hall.",
       max_level: 1,
       min_stage: "kampung",
-      min_stage_name: "Kampung",
+      min_stage_name: "Hamlet",
       cost_bac: 50,
       duration_secs: 25,
-      items: [{ item_id: "wood", name: "Kayu", need: 10 }],
+      items: [{ item_id: "wood", name: "Wood", need: 10 }],
     },
     {
       project: "granary",
-      name: "Lumbung",
+      name: "Granary",
       description:
-        "Menambah +4 slot tas & +3% yield semua aktivitas per level (maks Lv 5).",
+        "Adds +4 bag slots & +3% yield to all activities per level (max Lv 5).",
       max_level: 5,
       min_stage: "kampung",
-      min_stage_name: "Kampung",
+      min_stage_name: "Hamlet",
       cost_bac: 80,
       duration_secs: 25,
       items: [
-        { item_id: "wood", name: "Kayu", need: 15 },
-        { item_id: "wheat", name: "Gandum", need: 10 },
+        { item_id: "wood", name: "Wood", need: 15 },
+        { item_id: "wheat", name: "Wheat", need: 10 },
       ],
     },
     {
       project: "town_hall",
-      name: "Balai Kampung",
+      name: "Village Hall",
       description:
-        "Naikkan kota ke Desa (buka Fishing, 3 Slot Aktivitas, cap Lv 20; butuh Sumur & Lumbung).",
+        "Advance city to Village (unlocks Fishing, 3 Activity Slots, Lv 20 cap; requires Well & Granary).",
       max_level: 1,
       min_stage: "kampung",
-      min_stage_name: "Kampung",
+      min_stage_name: "Hamlet",
       cost_bac: 150,
       duration_secs: 25,
       items: [
-        { item_id: "wood", name: "Kayu", need: 25 },
-        { item_id: "potato", name: "Kentang", need: 10 },
+        { item_id: "wood", name: "Wood", need: 25 },
+        { item_id: "potato", name: "Potato", need: 10 },
       ],
     },
     {
       project: "market_hall",
-      name: "Pasar Desa",
-      description: "Bonus +5% harga jual ke NPC. Prasyarat Balai Kota Kecil.",
+      name: "Market Hall",
+      description: "+5% NPC sell price bonus. Prerequisite for Town Hall.",
       max_level: 1,
       min_stage: "desa",
-      min_stage_name: "Desa",
+      min_stage_name: "Village",
       cost_bac: 200,
       duration_secs: 25,
       items: [
-        { item_id: "plank", name: "Papan Kayu", need: 10 },
-        { item_id: "bread", name: "Roti Kampung", need: 5 },
+        { item_id: "plank", name: "Wood Plank", need: 10 },
+        { item_id: "bread", name: "Village Bread", need: 5 },
       ],
     },
     {
       project: "city_hall",
-      name: "Balai Kota Kecil",
+      name: "Town Hall",
       description:
-        "Naikkan kota ke Kota Kecil (buka Mining, 4 Slot Aktivitas, cap Lv 30; butuh Pasar Desa).",
+        "Advance city to Town (unlocks Mining, 4 Activity Slots, Lv 30 cap; requires Market Hall).",
       max_level: 1,
       min_stage: "desa",
-      min_stage_name: "Desa",
+      min_stage_name: "Village",
       cost_bac: 350,
       duration_secs: 25,
       items: [
-        { item_id: "wooden_crate", name: "Peti Kayu", need: 5 },
-        { item_id: "river_fish", name: "Ikan Sungai", need: 10 },
+        { item_id: "wooden_crate", name: "Wooden Crate", need: 5 },
+        { item_id: "river_fish", name: "River Fish", need: 10 },
       ],
     },
     {
       project: "trade_port",
-      name: "Pelabuhan Dagang",
+      name: "Trade Port",
       description:
-        "Naikkan kota ke Kota Dagang (cap Lv 40, 3 Slot Craft, +15% hadiah Pesanan NPC).",
+        "Advance city to Trade City (Lv 40 cap, 3 Craft Slots, +15% NPC Order rewards).",
       max_level: 1,
       min_stage: "kota_kecil",
-      min_stage_name: "Kota Kecil",
+      min_stage_name: "Town",
       cost_bac: 600,
       duration_secs: 25,
       items: [
-        { item_id: "plank", name: "Papan Kayu", need: 20 },
-        { item_id: "iron_ore", name: "Bijih Besi", need: 10 },
+        { item_id: "plank", name: "Wood Plank", need: 20 },
+        { item_id: "iron_ore", name: "Iron Ore", need: 10 },
       ],
     },
     {
       project: "metropolis_tower",
-      name: "Menara Metropolis",
+      name: "Metropolis Tower",
       description:
-        "Naikkan kota ke Metropolis (cap Lv 50, +15% kecepatan Aktivitas & Craft).",
+        "Advance city to Metropolis (Lv 50 cap, +15% Activity & Craft speed).",
       max_level: 1,
       min_stage: "kota_dagang",
-      min_stage_name: "Kota Dagang",
+      min_stage_name: "Trade City",
       cost_bac: 1200,
       duration_secs: 25,
       items: [
-        { item_id: "amethyst", name: "Kecubung", need: 5 },
-        { item_id: "healing_tonic", name: "Tonik Herba", need: 5 },
+        { item_id: "amethyst", name: "Amethyst", need: 5 },
+        { item_id: "healing_tonic", name: "Herbal Tonic", need: 5 },
       ],
     },
   ];
@@ -326,7 +325,7 @@ function buildQuotes(
         duration_secs: 0,
         items: [],
         can_start: false,
-        block_reason: `fasilitas ${d.name} sudah mencapai level maksimal`,
+        block_reason: `facility ${d.name} has already reached maximum level`,
       };
     }
 
@@ -343,22 +342,22 @@ function buildQuotes(
     if (runningProject) {
       const runningName =
         defs.find((x) => x.project === runningProject)?.name ?? runningProject;
-      blockReason = `proyek ${runningName} sudah berjalan`;
+      blockReason = `project ${runningName} is already in progress`;
     } else if (!stageGte(stage, d.min_stage)) {
-      blockReason = `proyek ini membutuhkan stage kota ${d.min_stage_name}`;
+      blockReason = `this project requires city stage ${d.min_stage_name}`;
     } else if (
       d.project === "town_hall" &&
       (facilities.well === 0 || facilities.granary === 0)
     ) {
-      blockReason = "prasyarat fasilitas belum terpenuhi (butuh Sumur & Lumbung)";
+      blockReason = "facility prerequisites not met (requires Well & Granary)";
     } else if (d.project === "city_hall" && facilities.market_hall === 0) {
-      blockReason = "prasyarat fasilitas belum terpenuhi (butuh Pasar Desa)";
+      blockReason = "facility prerequisites not met (requires Market Hall)";
     } else if (availableBac < costBac) {
-      blockReason = `saldo Bac tidak cukup (butuh ${costBac.toFixed(2)}, tersedia ${availableBac.toFixed(2)})`;
+      blockReason = `insufficient Bac balance (need ${costBac.toFixed(2)}, available ${availableBac.toFixed(2)})`;
     } else {
       const missing = items.find((i) => i.have < i.need);
       if (missing) {
-        blockReason = `resource ${missing.name} tidak cukup (butuh ${missing.need}, punya ${missing.have})`;
+        blockReason = `insufficient ${missing.name} (need ${missing.need}, have ${missing.have})`;
       }
     }
 
@@ -416,7 +415,7 @@ function createInitialState(preset: MockPreset): MockState {
       me: {
         registered: false,
         discord_user_id: "123456789012345678",
-        username: "WalikotaBaru",
+        username: "NewMayor",
         avatar_url: null,
         profile: null,
       },
@@ -435,34 +434,34 @@ function createInitialState(preset: MockPreset): MockState {
   const baseCalendar = {
     day: 3,
     season: "spring",
-    season_name: "Musim Semi",
-    season_hint: "+10% Kentang, Buah, Herba",
+    season_name: "Spring",
+    season_hint: "+10% Potato, Berries, Herb",
     active_event: "harvest_festival",
-    active_event_name: "Festival Panen",
-    event_hint: "+20% Gandum, Kentang, Roti",
+    active_event_name: "Harvest Festival",
+    event_hint: "+20% Wheat, Potato, Bread",
     trend_item_id: "wheat",
-    trend_item_name: "Gandum",
+    trend_item_name: "Wheat",
   };
 
   const baseOrders = [
-    { id: 1, item_id: "flour", name: "Tepung Gandum", quantity: 2, have: 0, reward_bac: "25.65", rep_xp: 30, can_fulfill: false },
-    { id: 2, item_id: "plank", name: "Papan Kayu", quantity: 2, have: 0, reward_bac: "25.65", rep_xp: 30, can_fulfill: false },
-    { id: 3, item_id: "bread", name: "Roti Kampung", quantity: 1, have: 0, reward_bac: "37.80", rep_xp: 15, can_fulfill: false },
+    { id: 1, item_id: "flour", name: "Wheat Flour", quantity: 2, have: 0, reward_bac: "25.65", rep_xp: 30, can_fulfill: false },
+    { id: 2, item_id: "plank", name: "Wood Plank", quantity: 2, have: 0, reward_bac: "25.65", rep_xp: 30, can_fulfill: false },
+    { id: 3, item_id: "bread", name: "Village Bread", quantity: 1, have: 0, reward_bac: "37.80", rep_xp: 15, can_fulfill: false },
   ];
 
   if (preset === "desa") {
     const items: InventoryItemDto[] = [
-      { item_id: "wheat", name: "Gandum", rarity: "Common", quantity: 34, npc_unit_price: "3.25" },
-      { item_id: "wood", name: "Kayu", rarity: "Common", quantity: 42, npc_unit_price: "3.15" },
-      { item_id: "river_fish", name: "Ikan Sungai", rarity: "Common", quantity: 14, npc_unit_price: "5.40" },
-      { item_id: "silver_carp", name: "Gurame Perak", rarity: "Uncommon", quantity: 4, npc_unit_price: "17.10" },
-      { item_id: "wooden_crate", name: "Peti Kayu", rarity: "Uncommon", quantity: 6, npc_unit_price: "34.00" },
+      { item_id: "wheat", name: "Wheat", rarity: "Common", quantity: 34, npc_unit_price: "3.25" },
+      { item_id: "wood", name: "Wood", rarity: "Common", quantity: 42, npc_unit_price: "3.15" },
+      { item_id: "river_fish", name: "River Fish", rarity: "Common", quantity: 14, npc_unit_price: "5.40" },
+      { item_id: "silver_carp", name: "Silver Carp", rarity: "Uncommon", quantity: 4, npc_unit_price: "17.10" },
+      { item_id: "wooden_crate", name: "Wooden Crate", rarity: "Uncommon", quantity: 6, npc_unit_price: "34.00" },
     ];
     return {
       me: {
         registered: true,
         discord_user_id: "123456789012345678",
-        username: "WargaDev",
+        username: "CitizenDev",
         avatar_url: null,
         profile: {
           level: 9,
@@ -470,16 +469,16 @@ function createInitialState(preset: MockPreset): MockState {
           xp_needed: 900,
           balance: "485.50",
           city_stage: "desa",
-          city_stage_name: "Desa",
-          lang: "id",
+          city_stage_name: "Village",
+          lang: "en",
           slots_used: items.length,
           slot_capacity: 20,
         },
       },
       city: {
         stage: "desa",
-        stage_name: "Desa",
-        era: "Era Desa",
+        stage_name: "Village",
+        era: "Village Era",
         treasury: "210.00",
         wallet_balance: "485.50",
         tax_rate_pct: 10,
@@ -490,10 +489,10 @@ function createInitialState(preset: MockPreset): MockState {
         est_expense: "28.00",
         assigned_crews: 1,
         facilities: [
-          { id: "well", name: "Sumur", level: 1 },
-          { id: "granary", name: "Lumbung", level: 2 },
-          { id: "town_hall", name: "Balai Kampung", level: 1 },
-          { id: "market_hall", name: "Pasar Desa", level: 1 },
+          { id: "well", name: "Well", level: 1 },
+          { id: "granary", name: "Granary", level: 2 },
+          { id: "town_hall", name: "Village Hall", level: 1 },
+          { id: "market_hall", name: "Market Hall", level: 1 },
         ],
         running_project: null,
         server_time: nowIso,
@@ -501,7 +500,7 @@ function createInitialState(preset: MockPreset): MockState {
       inventory: { slots_used: items.length, slot_capacity: 20, items, pending: [] },
       activities: {
         stage: "desa",
-        stage_name: "Desa",
+        stage_name: "Village",
         slots_total: 3,
         runs: [
           { id: 21, kind: "fishing", name: "Fishing", status: "running", ends_at: isoAfter(25) },
@@ -513,10 +512,10 @@ function createInitialState(preset: MockPreset): MockState {
           { kind: "fishing", name: "Fishing", level: 4, xp: 150, xp_needed: 400, overflow: 0, cap: 20 },
         ],
         catalog: [
-          { kind: "farming", name: "Farming", min_stage: "kampung", min_stage_name: "Kampung", unlocked: true, base_duration_secs: 20, xp_reward: 35 },
-          { kind: "gathering", name: "Gathering", min_stage: "kampung", min_stage_name: "Kampung", unlocked: true, base_duration_secs: 20, xp_reward: 25 },
-          { kind: "fishing", name: "Fishing", min_stage: "desa", min_stage_name: "Desa", unlocked: true, base_duration_secs: 20, xp_reward: 40 },
-          { kind: "mining", name: "Mining", min_stage: "kota_kecil", min_stage_name: "Kota Kecil", unlocked: false, base_duration_secs: 20, xp_reward: 55 },
+          { kind: "farming", name: "Farming", min_stage: "kampung", min_stage_name: "Hamlet", unlocked: true, base_duration_secs: 20, xp_reward: 35 },
+          { kind: "gathering", name: "Gathering", min_stage: "kampung", min_stage_name: "Hamlet", unlocked: true, base_duration_secs: 20, xp_reward: 25 },
+          { kind: "fishing", name: "Fishing", min_stage: "desa", min_stage_name: "Village", unlocked: true, base_duration_secs: 20, xp_reward: 40 },
+          { kind: "mining", name: "Mining", min_stage: "kota_kecil", min_stage_name: "Town", unlocked: false, base_duration_secs: 20, xp_reward: 55 },
         ],
         server_time: nowIso,
       },
@@ -570,21 +569,144 @@ function createInitialState(preset: MockPreset): MockState {
     };
   }
 
-  if (preset === "metropolis") {
+  if (preset === "kota_kecil" || preset === "kota_dagang") {
+    const isTrade = preset === "kota_dagang";
+    const stage: CityStageKey = isTrade ? "kota_dagang" : "kota_kecil";
+    const stageName = isTrade ? "Trade City" : "Town";
+    const era = isTrade ? "City Era" : "Town Era";
     const items: InventoryItemDto[] = [
-      { item_id: "wheat", name: "Gandum", rarity: "Common", quantity: 120, npc_unit_price: "3.45" },
-      { item_id: "plank", name: "Papan Kayu", rarity: "Common", quantity: 48, npc_unit_price: "10.10" },
-      { item_id: "bread", name: "Roti Kampung", rarity: "Common", quantity: 18, npc_unit_price: "29.90" },
-      { item_id: "golden_eel", name: "Belut Emas", rarity: "Rare", quantity: 5, npc_unit_price: "48.20" },
-      { item_id: "amethyst", name: "Kecubung", rarity: "Rare", quantity: 9, npc_unit_price: "64.00" },
-      { item_id: "star_crystal", name: "Kristal Bintang", rarity: "Epic", quantity: 2, npc_unit_price: "162.50" },
+      { item_id: "wheat", name: "Wheat", rarity: "Common", quantity: 64, npc_unit_price: "3.45" },
+      { item_id: "wood", name: "Wood", rarity: "Common", quantity: 52, npc_unit_price: "3.15" },
+      { item_id: "stone", name: "Stone", rarity: "Common", quantity: 36, npc_unit_price: "4.50" },
+      { item_id: "silver_carp", name: "Silver Carp", rarity: "Uncommon", quantity: 9, npc_unit_price: "17.10" },
+      { item_id: "iron_ore", name: "Iron Ore", rarity: "Uncommon", quantity: 14, npc_unit_price: "18.90" },
     ];
     return {
       me: {
         registered: true,
         discord_user_id: "123456789012345678",
-        username: "ArsitekMetro",
+        username: isTrade ? "MerchantMayor" : "TownMayor",
         avatar_url: null,
+        profile: {
+          level: isTrade ? 21 : 14,
+          xp: isTrade ? 1120 : 680,
+          xp_needed: isTrade ? 2100 : 1400,
+          balance: isTrade ? "1420.00" : "860.25",
+          city_stage: stage,
+          city_stage_name: stageName,
+          lang: "en",
+          slots_used: items.length,
+          slot_capacity: isTrade ? 28 : 24,
+        },
+      },
+      city: {
+        stage,
+        stage_name: stageName,
+        era,
+        treasury: isTrade ? "740.00" : "410.00",
+        wallet_balance: isTrade ? "1420.00" : "860.25",
+        tax_rate_pct: 10,
+        welfare: isTrade ? 98 : 96,
+        effectiveness_pct: isTrade ? 113 : 112,
+        yield_bonus_pct: isTrade ? 18 : 14,
+        est_tax_income: isTrade ? "185.00" : "112.00",
+        est_expense: isTrade ? "48.00" : "34.00",
+        assigned_crews: 2,
+        facilities: [
+          { id: "well", name: "Well", level: 1 },
+          { id: "granary", name: "Granary", level: isTrade ? 4 : 3 },
+          { id: "town_hall", name: "Village Hall", level: 1 },
+          { id: "market_hall", name: "Market Hall", level: 1 },
+          ...(isTrade
+            ? ([
+                { id: "city_hall", name: "Town Hall", level: 1 },
+                { id: "trade_port", name: "Trade Port", level: 1 },
+              ] as const)
+            : ([] as const)),
+        ],
+        running_project: null,
+        server_time: nowIso,
+      },
+      inventory: {
+        slots_used: items.length,
+        slot_capacity: isTrade ? 28 : 24,
+        items,
+        pending: [],
+      },
+      activities: {
+        stage,
+        stage_name: stageName,
+        slots_total: 4,
+        runs: [
+          { id: 41, kind: "mining", name: "Mining", status: "running", ends_at: isoAfter(22) },
+          { id: 42, kind: "fishing", name: "Fishing", status: "running", ends_at: isoAfter(18) },
+        ],
+        progress: [
+          { kind: "farming", name: "Farming", level: isTrade ? 24 : 18, xp: 520, xp_needed: 1800, overflow: 0, cap: isTrade ? 40 : 30 },
+          { kind: "gathering", name: "Gathering", level: isTrade ? 22 : 16, xp: 430, xp_needed: 1600, overflow: 0, cap: isTrade ? 40 : 30 },
+          { kind: "fishing", name: "Fishing", level: isTrade ? 19 : 11, xp: 310, xp_needed: 1100, overflow: 0, cap: isTrade ? 40 : 30 },
+          { kind: "mining", name: "Mining", level: isTrade ? 15 : 6, xp: 240, xp_needed: 600, overflow: 0, cap: isTrade ? 40 : 30 },
+        ],
+        catalog: [
+          { kind: "farming", name: "Farming", min_stage: "kampung", min_stage_name: "Hamlet", unlocked: true, base_duration_secs: 20, xp_reward: 35 },
+          { kind: "gathering", name: "Gathering", min_stage: "kampung", min_stage_name: "Hamlet", unlocked: true, base_duration_secs: 20, xp_reward: 25 },
+          { kind: "fishing", name: "Fishing", min_stage: "desa", min_stage_name: "Village", unlocked: true, base_duration_secs: 20, xp_reward: 40 },
+          { kind: "mining", name: "Mining", min_stage: "kota_kecil", min_stage_name: "Town", unlocked: true, base_duration_secs: 20, xp_reward: 55 },
+        ],
+        server_time: nowIso,
+      },
+      market: {
+        wallet_balance: isTrade ? "1420.00" : "860.25",
+        calendar: baseCalendar,
+        prices,
+        listings: [],
+        max_listings: 5,
+        fee_pct: 1,
+        commission_pct: 3,
+        server_time: nowIso,
+      },
+      crafting: {
+        max_concurrent: isTrade ? 3 : 2,
+        rep_level: isTrade ? 4 : 3,
+        rep_xp: 60,
+        rep_xp_needed: 180,
+        rep_bonus_pct: isTrade ? 9 : 6,
+        completed_orders: isTrade ? 9 : 6,
+        auto_sell: false,
+        running: [],
+        orders: baseOrders,
+        recipes: [],
+        server_time: nowIso,
+      },
+      crew: {
+        max_slots: 4,
+        max_level: 10,
+        recruit_cost: "100.00",
+        members: [],
+      },
+      nextId: 100,
+      usedKeys: new Set(),
+    };
+  }
+
+  if (preset === "metropolis") {
+    const items: InventoryItemDto[] = [
+      { item_id: "wheat", name: "Wheat", rarity: "Common", quantity: 120, npc_unit_price: "3.45" },
+      { item_id: "plank", name: "Wood Plank", rarity: "Common", quantity: 48, npc_unit_price: "10.10" },
+      { item_id: "bread", name: "Village Bread", rarity: "Common", quantity: 18, npc_unit_price: "29.90" },
+      { item_id: "golden_eel", name: "Golden Eel", rarity: "Rare", quantity: 5, npc_unit_price: "48.20" },
+      { item_id: "amethyst", name: "Amethyst", rarity: "Rare", quantity: 9, npc_unit_price: "64.00" },
+      { item_id: "star_crystal", name: "Star Crystal", rarity: "Epic", quantity: 2, npc_unit_price: "162.50" },
+    ];
+    return {
+      me: {
+        registered: true,
+        discord_user_id: "123456789012345678",
+        username: "MetroArchitect",
+        avatar_url: null,
+        voice_boost_active: true,
+        voice_boost_speed_pct: 20,
+        voice_boost_xp_pct: 15,
         profile: {
           level: 28,
           xp: 1650,
@@ -592,7 +714,7 @@ function createInitialState(preset: MockPreset): MockState {
           balance: "2450.75",
           city_stage: "metropolis",
           city_stage_name: "Metropolis",
-          lang: "id",
+          lang: "en",
           slots_used: items.length,
           slot_capacity: 32,
         },
@@ -600,7 +722,7 @@ function createInitialState(preset: MockPreset): MockState {
       city: {
         stage: "metropolis",
         stage_name: "Metropolis",
-        era: "Era Metropolis",
+        era: "Metropolis Era",
         treasury: "1380.00",
         wallet_balance: "2450.75",
         tax_rate_pct: 10,
@@ -611,13 +733,13 @@ function createInitialState(preset: MockPreset): MockState {
         est_expense: "67.00",
         assigned_crews: 2,
         facilities: [
-          { id: "well", name: "Sumur", level: 1 },
-          { id: "granary", name: "Lumbung", level: 5 },
-          { id: "town_hall", name: "Balai Kampung", level: 1 },
-          { id: "market_hall", name: "Pasar Desa", level: 1 },
-          { id: "city_hall", name: "Balai Kota Kecil", level: 1 },
-          { id: "trade_port", name: "Pelabuhan Dagang", level: 1 },
-          { id: "metropolis_tower", name: "Menara Metropolis", level: 1 },
+          { id: "well", name: "Well", level: 1 },
+          { id: "granary", name: "Granary", level: 5 },
+          { id: "town_hall", name: "Village Hall", level: 1 },
+          { id: "market_hall", name: "Market Hall", level: 1 },
+          { id: "city_hall", name: "Town Hall", level: 1 },
+          { id: "trade_port", name: "Trade Port", level: 1 },
+          { id: "metropolis_tower", name: "Metropolis Tower", level: 1 },
         ],
         running_project: null,
         server_time: nowIso,
@@ -639,10 +761,10 @@ function createInitialState(preset: MockPreset): MockState {
           { kind: "mining", name: "Mining", level: 22, xp: 450, xp_needed: 2200, overflow: 0, cap: 50 },
         ],
         catalog: [
-          { kind: "farming", name: "Farming", min_stage: "kampung", min_stage_name: "Kampung", unlocked: true, base_duration_secs: 20, xp_reward: 35 },
-          { kind: "gathering", name: "Gathering", min_stage: "kampung", min_stage_name: "Kampung", unlocked: true, base_duration_secs: 20, xp_reward: 25 },
-          { kind: "fishing", name: "Fishing", min_stage: "desa", min_stage_name: "Desa", unlocked: true, base_duration_secs: 20, xp_reward: 40 },
-          { kind: "mining", name: "Mining", min_stage: "kota_kecil", min_stage_name: "Kota Kecil", unlocked: true, base_duration_secs: 20, xp_reward: 55 },
+          { kind: "farming", name: "Farming", min_stage: "kampung", min_stage_name: "Hamlet", unlocked: true, base_duration_secs: 20, xp_reward: 35 },
+          { kind: "gathering", name: "Gathering", min_stage: "kampung", min_stage_name: "Hamlet", unlocked: true, base_duration_secs: 20, xp_reward: 25 },
+          { kind: "fishing", name: "Fishing", min_stage: "desa", min_stage_name: "Village", unlocked: true, base_duration_secs: 20, xp_reward: 40 },
+          { kind: "mining", name: "Mining", min_stage: "kota_kecil", min_stage_name: "Town", unlocked: true, base_duration_secs: 20, xp_reward: 55 },
         ],
         server_time: nowIso,
       },
@@ -651,13 +773,13 @@ function createInitialState(preset: MockPreset): MockState {
         calendar: {
           day: 11,
           season: "summer",
-          season_name: "Musim Panas",
-          season_hint: "+12% Ikan",
+          season_name: "Summer",
+          season_hint: "+12% Fish",
           active_event: "mining_boom",
-          active_event_name: "Demam Tambang",
-          event_hint: "+20% Hasil Tambang",
+          active_event_name: "Mining Boom",
+          event_hint: "+20% Mining Yield",
           trend_item_id: "amethyst",
-          trend_item_name: "Kecubung",
+          trend_item_name: "Amethyst",
         },
         prices,
         listings: [],
@@ -723,16 +845,16 @@ function createInitialState(preset: MockPreset): MockState {
 
   // Default: "kampung"
   const items: InventoryItemDto[] = [
-    { item_id: "wheat", name: "Gandum", rarity: "Common", quantity: 14, npc_unit_price: "3.12" },
-    { item_id: "potato", name: "Kentang", rarity: "Common", quantity: 8, npc_unit_price: "4.10" },
-    { item_id: "wood", name: "Kayu", rarity: "Common", quantity: 19, npc_unit_price: "2.95" },
-    { item_id: "wild_herb", name: "Herba Liar", rarity: "Uncommon", quantity: 3, npc_unit_price: "12.40" },
+    { item_id: "wheat", name: "Wheat", rarity: "Common", quantity: 14, npc_unit_price: "3.12" },
+    { item_id: "potato", name: "Potato", rarity: "Common", quantity: 8, npc_unit_price: "4.10" },
+    { item_id: "wood", name: "Wood", rarity: "Common", quantity: 19, npc_unit_price: "2.95" },
+    { item_id: "wild_herb", name: "Wild Herb", rarity: "Uncommon", quantity: 3, npc_unit_price: "12.40" },
   ];
   return {
     me: {
       registered: true,
       discord_user_id: "123456789012345678",
-      username: "WargaDev",
+      username: "CitizenDev",
       avatar_url: null,
       profile: {
         level: 4,
@@ -740,16 +862,16 @@ function createInitialState(preset: MockPreset): MockState {
         xp_needed: 400,
         balance: "142.50",
         city_stage: "kampung",
-        city_stage_name: "Kampung",
-        lang: "id",
+        city_stage_name: "Hamlet",
+        lang: "en",
         slots_used: items.length,
         slot_capacity: 12,
       },
     },
     city: {
       stage: "kampung",
-      stage_name: "Kampung",
-      era: "Era Desa",
+      stage_name: "Hamlet",
+      era: "Village Era",
       treasury: "45.00",
       wallet_balance: "142.50",
       tax_rate_pct: 10,
@@ -759,11 +881,11 @@ function createInitialState(preset: MockPreset): MockState {
       est_tax_income: "20.24",
       est_expense: "5.00",
       assigned_crews: 0,
-      facilities: [{ id: "well", name: "Sumur", level: 1 }],
+      facilities: [{ id: "well", name: "Well", level: 1 }],
       running_project: {
         id: 7,
         project: "granary",
-        name: "Lumbung",
+        name: "Granary",
         ends_at: isoAfter(25),
       },
       server_time: nowIso,
@@ -772,11 +894,11 @@ function createInitialState(preset: MockPreset): MockState {
       slots_used: items.length,
       slot_capacity: 12,
       items,
-      pending: [{ item_id: "berries", name: "Buah Hutan", rarity: "Common", quantity: 6 }],
+      pending: [{ item_id: "berries", name: "Forest Berries", rarity: "Common", quantity: 6 }],
     },
     activities: {
       stage: "kampung",
-      stage_name: "Kampung",
+      stage_name: "Hamlet",
       slots_total: 2,
       runs: [
         { id: 11, kind: "farming", name: "Farming", status: "running", ends_at: isoAfter(20) },
@@ -787,10 +909,10 @@ function createInitialState(preset: MockPreset): MockState {
         { kind: "gathering", name: "Gathering", level: 10, xp: 0, xp_needed: 1000, overflow: 75, cap: 10 },
       ],
       catalog: [
-        { kind: "farming", name: "Farming", min_stage: "kampung", min_stage_name: "Kampung", unlocked: true, base_duration_secs: 20, xp_reward: 35 },
-        { kind: "gathering", name: "Gathering", min_stage: "kampung", min_stage_name: "Kampung", unlocked: true, base_duration_secs: 20, xp_reward: 25 },
-        { kind: "fishing", name: "Fishing", min_stage: "desa", min_stage_name: "Desa", unlocked: false, base_duration_secs: 20, xp_reward: 40 },
-        { kind: "mining", name: "Mining", min_stage: "kota_kecil", min_stage_name: "Kota Kecil", unlocked: false, base_duration_secs: 20, xp_reward: 55 },
+        { kind: "farming", name: "Farming", min_stage: "kampung", min_stage_name: "Hamlet", unlocked: true, base_duration_secs: 20, xp_reward: 35 },
+        { kind: "gathering", name: "Gathering", min_stage: "kampung", min_stage_name: "Hamlet", unlocked: true, base_duration_secs: 20, xp_reward: 25 },
+        { kind: "fishing", name: "Fishing", min_stage: "desa", min_stage_name: "Village", unlocked: false, base_duration_secs: 20, xp_reward: 40 },
+        { kind: "mining", name: "Mining", min_stage: "kota_kecil", min_stage_name: "Town", unlocked: false, base_duration_secs: 20, xp_reward: 55 },
       ],
       server_time: nowIso,
     },
@@ -1072,27 +1194,15 @@ export function mockRegister(preset: MockPreset): RegisterResponse {
   return { created: true, discord_user_id: fresh.me.discord_user_id };
 }
 
-export function mockSetLang(preset: MockPreset, lang?: "en" | "id"): SetLangResponse {
-  const st = getState(preset);
-  if (!st.me.profile) throw new Error("Profil belum ada.");
-  const next: "en" | "id" =
-    lang ?? (st.me.profile.lang === "id" ? "en" : "id");
-  st.me.profile.lang = next;
-  return {
-    lang: next,
-    label: next === "id" ? "Bahasa Indonesia" : "English",
-  };
-}
-
 export function mockStartActivity(preset: MockPreset, kind: ActivityKindKey): ActivityRunDto {
   const st = getState(preset);
-  if (!st.activities) throw new Error("Profil belum ada.");
+  if (!st.activities) throw new Error("Profile not found.");
   const cat = st.activities.catalog.find((c) => c.kind === kind);
   if (!cat || !cat.unlocked) {
-    throw new Error(`Aktivitas ini terbuka di stage ${cat?.min_stage_name ?? "-"}.`);
+    throw new Error(`This activity unlocks at ${cat?.min_stage_name ?? "-"} stage.`);
   }
   if (st.activities.runs.length >= st.activities.slots_total) {
-    throw new Error(`Semua Activity Slot terpakai (${st.activities.slots_total} slot).`);
+    throw new Error(`All Activity Slots are in use (${st.activities.slots_total} slots).`);
   }
   const run: ActivityRunDto = {
     id: st.nextId++,
@@ -1108,7 +1218,7 @@ export function mockStartActivity(preset: MockPreset, kind: ActivityKindKey): Ac
 export function mockCollectActivities(preset: MockPreset): CollectActivitiesResponse {
   const st = getState(preset);
   if (!st.activities || !st.inventory || !st.me.profile) {
-    throw new Error("Profil belum ada.");
+    throw new Error("Profile not found.");
   }
   const ready = st.activities.runs.filter((r) => r.status === "ready");
   st.activities.runs = st.activities.runs.filter((r) => r.status !== "ready");
@@ -1177,7 +1287,7 @@ export function mockSellToNpc(
   requestId: string,
 ): MarketSellResponse {
   const st = getState(preset);
-  if (!st.inventory || !st.city) throw new Error("Profil belum ada.");
+  if (!st.inventory || !st.city) throw new Error("Profile not found.");
   const key = `sell:${requestId}`;
   const item = st.inventory.items.find((i) => i.item_id === itemId);
   if (st.usedKeys.has(key)) {
@@ -1190,10 +1300,10 @@ export function mockSellToNpc(
       wallet_balance: st.city.wallet_balance,
     };
   }
-  if (!item) throw new Error("Jumlah item tidak cukup (kamu punya 0).");
+  if (!item) throw new Error("Insufficient item quantity (you have 0).");
   const qty = sellAll ? item.quantity : (quantity ?? 0);
   if (qty <= 0 || qty > item.quantity) {
-    throw new Error(`Jumlah item tidak cukup (kamu punya ${item.quantity}).`);
+    throw new Error(`Insufficient item quantity (you have ${item.quantity}).`);
   }
 
   st.usedKeys.add(key);
@@ -1217,7 +1327,7 @@ export function mockSellToNpc(
 
 export function mockClaimPending(preset: MockPreset): ClaimPendingResponse {
   const st = getState(preset);
-  if (!st.inventory) throw new Error("Profil belum ada.");
+  if (!st.inventory) throw new Error("Profile not found.");
   const claimed = [];
   const nextPending = [];
   for (const p of st.inventory.pending) {
@@ -1243,7 +1353,7 @@ export function mockStartProject(
   requestId: string,
 ): RunningProjectDto {
   const st = getState(preset);
-  if (!st.city || !st.inventory) throw new Error("Profil belum ada.");
+  if (!st.city || !st.inventory) throw new Error("Profile not found.");
   const key = `proj:${requestId}`;
   if (st.usedKeys.has(key) && st.city.running_project) {
     return structuredClone(st.city.running_project);
@@ -1258,8 +1368,8 @@ export function mockStartProject(
     stock,
   ).find((q) => q.project === facility);
 
-  if (!quote) throw new Error("Fasilitas tidak dikenal.");
-  if (!quote.can_start) throw new Error(quote.block_reason ?? "Proyek tidak bisa dimulai.");
+  if (!quote) throw new Error("Unknown facility.");
+  if (!quote.can_start) throw new Error(quote.block_reason ?? "Project cannot be started.");
 
   st.usedKeys.add(key);
   const cost = Number(quote.cost_bac);
@@ -1293,10 +1403,10 @@ export function mockTreasuryTransfer(
   requestId: string,
 ): TreasuryBalanceResponse {
   const st = getState(preset);
-  if (!st.city) throw new Error("Profil belum ada.");
+  if (!st.city) throw new Error("Profile not found.");
   const amount = Number(amountStr);
   if (!Number.isFinite(amount) || amount <= 0) {
-    throw new Error("Jumlah setoran harus lebih dari 0.");
+    throw new Error("Amount must be greater than 0.");
   }
   const key = `${dir}:${requestId}`;
   if (st.usedKeys.has(key)) {
@@ -1305,11 +1415,11 @@ export function mockTreasuryTransfer(
   const w = Number(st.city.wallet_balance);
   const t = Number(st.city.treasury);
   if (dir === "deposit") {
-    if (w < amount) throw new Error("Saldo Bac Wallet tidak cukup.");
+    if (w < amount) throw new Error("Insufficient Wallet Bac balance.");
     st.city.wallet_balance = (w - amount).toFixed(2);
     st.city.treasury = (t + amount).toFixed(2);
   } else {
-    if (t < amount) throw new Error("Saldo City Treasury tidak cukup.");
+    if (t < amount) throw new Error("Insufficient City Treasury balance.");
     st.city.treasury = (t - amount).toFixed(2);
     st.city.wallet_balance = (w + amount).toFixed(2);
   }
@@ -1320,8 +1430,8 @@ export function mockTreasuryTransfer(
 
 export function mockSetTaxRate(preset: MockPreset, taxRatePct: number): SetTaxResponse {
   const st = getState(preset);
-  if (!st.city) throw new Error("Profil belum ada.");
-  if (taxRatePct < 0 || taxRatePct > 25) throw new Error("Tarif pajak harus 0%–25%.");
+  if (!st.city) throw new Error("Profile not found.");
+  if (taxRatePct < 0 || taxRatePct > 25) throw new Error("Tax rate must be 0%–25%.");
   st.city.tax_rate_pct = taxRatePct;
   return { tax_rate_pct: taxRatePct };
 }
@@ -1337,19 +1447,19 @@ export function mockCreateListing(
   },
 ): BrokerListingDto {
   const st = getState(preset);
-  if (!st.market || !st.inventory || !st.city) throw new Error("Profil belum ada.");
+  if (!st.market || !st.inventory || !st.city) throw new Error("Profile not found.");
   if (st.market.listings.length >= st.market.max_listings) {
-    throw new Error(`Maksimal ${st.market.max_listings} listing broker aktif.`);
+    throw new Error(`Maximum of ${st.market.max_listings} active broker listings reached.`);
   }
   const price = Number(params.targetUnitPrice);
-  if (!Number.isFinite(price) || price <= 0) throw new Error("Harga target harus > 0.");
+  if (!Number.isFinite(price) || price <= 0) throw new Error("Target price must be > 0.");
   const item = st.inventory.items.find((i) => i.item_id === params.itemId);
   if (!item || item.quantity < params.quantity || params.quantity <= 0) {
-    throw new Error("Jumlah item tidak cukup.");
+    throw new Error("Insufficient item quantity.");
   }
   const fee = Math.max(0.5, Number((price * params.quantity * 0.01).toFixed(2)));
   const bal = Number(st.city.wallet_balance);
-  if (bal < fee) throw new Error(`Saldo Bac tidak cukup untuk fee (${fee.toFixed(2)} Bac).`);
+  if (bal < fee) throw new Error(`Insufficient Bac balance for listing fee (${fee.toFixed(2)} Bac).`);
 
   st.city.wallet_balance = (bal - fee).toFixed(2);
   item.quantity -= params.quantity;
@@ -1376,9 +1486,9 @@ export function mockCancelListing(
   listingId: number,
 ): CancelListingResponse {
   const st = getState(preset);
-  if (!st.market || !st.inventory) throw new Error("Profil belum ada.");
+  if (!st.market || !st.inventory) throw new Error("Profile not found.");
   const idx = st.market.listings.findIndex((l) => l.id === listingId);
-  if (idx === -1) throw new Error("Listing tidak ditemukan.");
+  if (idx === -1) throw new Error("Listing not found.");
   const [removed] = st.market.listings.splice(idx, 1);
   const { stored, pending } = grantItem(st, removed.item_id, removed.quantity);
   reconcileState(st);
@@ -1396,17 +1506,17 @@ export function mockStartCraft(
   batchQty: number,
 ): CraftRunDto {
   const st = getState(preset);
-  if (!st.crafting || !st.inventory) throw new Error("Profil belum ada.");
+  if (!st.crafting || !st.inventory) throw new Error("Profile not found.");
   const recipe = RECIPE_CATALOG.find((r) => r.id === recipeId);
-  if (!recipe) throw new Error("Resep tidak dikenal.");
+  if (!recipe) throw new Error("Unknown recipe.");
   if (st.crafting.running.length >= st.crafting.max_concurrent) {
-    throw new Error(`Maksimal ${st.crafting.max_concurrent} crafting berjalan.`);
+    throw new Error(`Maximum of ${st.crafting.max_concurrent} concurrent crafts reached.`);
   }
   const qty = Math.max(1, Math.floor(batchQty));
   for (const inp of recipe.inputs) {
     const have = st.inventory.items.find((i) => i.item_id === inp.item_id)?.quantity ?? 0;
     if (have < inp.need * qty) {
-      throw new Error(`Bahan ${inp.name} tidak cukup (butuh ${inp.need * qty}, punya ${have}).`);
+      throw new Error(`Insufficient ${inp.name} (need ${inp.need * qty}, have ${have}).`);
     }
   }
   for (const inp of recipe.inputs) {
@@ -1429,7 +1539,7 @@ export function mockStartCraft(
 
 export function mockToggleCraftAutoSell(preset: MockPreset): { auto_sell: boolean } {
   const st = getState(preset);
-  if (!st.crafting) throw new Error("Profil belum ada.");
+  if (!st.crafting) throw new Error("Profile not found.");
   st.crafting.auto_sell = !st.crafting.auto_sell;
   return { auto_sell: st.crafting.auto_sell };
 }
@@ -1439,13 +1549,13 @@ export function mockFulfillOrder(
   orderId: number,
 ): FulfillOrderResponse {
   const st = getState(preset);
-  if (!st.crafting || !st.inventory || !st.city) throw new Error("Profil belum ada.");
+  if (!st.crafting || !st.inventory || !st.city) throw new Error("Profile not found.");
   const idx = st.crafting.orders.findIndex((o) => o.id === orderId);
-  if (idx === -1) throw new Error("Pesanan tidak ditemukan.");
+  if (idx === -1) throw new Error("Order not found.");
   const order = st.crafting.orders[idx];
   const line = st.inventory.items.find((i) => i.item_id === order.item_id);
   if (!line || line.quantity < order.quantity) {
-    throw new Error(`Item ${order.name} kurang untuk pesanan.`);
+    throw new Error(`Not enough ${order.name} to fulfill order.`);
   }
   line.quantity -= order.quantity;
   st.inventory.items = st.inventory.items.filter((i) => i.quantity > 0);
@@ -1461,7 +1571,7 @@ export function mockFulfillOrder(
     st.crafting.rep_bonus_pct = (st.crafting.rep_level - 1) * 3;
   }
   st.crafting.completed_orders += 1;
-  // Ganti pesanan yang selesai
+  // Replace completed order
   const nextRec = RECIPE_CATALOG[(st.nextId++) % RECIPE_CATALOG.length];
   st.crafting.orders[idx] = {
     id: st.nextId++,
@@ -1487,7 +1597,7 @@ export function mockFulfillOrder(
 
 export function mockRefreshOrders(preset: MockPreset): { ok: boolean } {
   const st = getState(preset);
-  if (!st.crafting) throw new Error("Profil belum ada.");
+  if (!st.crafting) throw new Error("Profile not found.");
   st.crafting.orders = [0, 1, 2].map((i) => {
     const r = RECIPE_CATALOG[(st.nextId + i) % RECIPE_CATALOG.length];
     const qty = 1 + ((st.nextId + i) % 3);
@@ -1509,13 +1619,13 @@ export function mockRefreshOrders(preset: MockPreset): { ok: boolean } {
 
 export function mockRecruitCrew(preset: MockPreset, requestId: string): CrewMemberDto {
   const st = getState(preset);
-  if (!st.crew || !st.city) throw new Error("Profil belum ada.");
+  if (!st.crew || !st.city) throw new Error("Profile not found.");
   if (st.crew.members.length >= st.crew.max_slots) {
-    throw new Error(`Slot kru penuh (maksimal ${st.crew.max_slots} kru).`);
+    throw new Error(`Crew slots full (maximum ${st.crew.max_slots} crew).`);
   }
   const cost = Number(st.crew.recruit_cost);
   const bal = Number(st.city.wallet_balance);
-  if (bal < cost) throw new Error("Saldo Bac tidak cukup.");
+  if (bal < cost) throw new Error("Insufficient Bac balance.");
   const key = `crec:${requestId}`;
   if (st.usedKeys.has(key) && st.crew.members.length > 0) {
     return structuredClone(st.crew.members[st.crew.members.length - 1]);
@@ -1552,17 +1662,17 @@ export function mockUpgradeCrew(
   requestId: string,
 ): CrewMemberDto {
   const st = getState(preset);
-  if (!st.crew || !st.city) throw new Error("Profil belum ada.");
+  if (!st.crew || !st.city) throw new Error("Profile not found.");
   const member = st.crew.members.find((m) => m.id === crewId);
-  if (!member) throw new Error("Kru tidak ditemukan.");
+  if (!member) throw new Error("Crew member not found.");
   if (member.level >= st.crew.max_level || !member.upgrade_cost) {
-    throw new Error("Kru sudah di level maksimal.");
+    throw new Error("Crew member is already at max level.");
   }
   const key = `cupg:${requestId}`;
   if (st.usedKeys.has(key)) return structuredClone(member);
   const cost = Number(member.upgrade_cost);
   const bal = Number(st.city.wallet_balance);
-  if (bal < cost) throw new Error("Saldo Bac tidak cukup.");
+  if (bal < cost) throw new Error("Insufficient Bac balance.");
   st.usedKeys.add(key);
   st.city.wallet_balance = (bal - cost).toFixed(2);
   member.level += 1;
@@ -1582,12 +1692,12 @@ export function mockAssignCrew(
   autoEnabled: boolean,
 ): CrewMemberDto {
   const st = getState(preset);
-  if (!st.crew || !st.activities) throw new Error("Profil belum ada.");
+  if (!st.crew || !st.activities) throw new Error("Profile not found.");
   const member = st.crew.members.find((m) => m.id === crewId);
-  if (!member) throw new Error("Kru tidak ditemukan.");
+  if (!member) throw new Error("Crew member not found.");
   if (activity) {
     const cat = st.activities.catalog.find((c) => c.kind === activity);
-    if (!cat || !cat.unlocked) throw new Error("Aktivitas belum terbuka.");
+    if (!cat || !cat.unlocked) throw new Error("Activity is not unlocked yet.");
     for (const m of st.crew.members) {
       if (m.assigned === activity) {
         m.assigned = null;

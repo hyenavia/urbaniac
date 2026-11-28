@@ -39,11 +39,11 @@ pub enum SaleOutcome {
 
 #[derive(Debug, thiserror::Error)]
 pub enum SellError {
-    #[error("item tidak dikenal")]
+    #[error("Unknown item")]
     UnknownItem,
-    #[error("jumlah tidak valid")]
+    #[error("Invalid quantity")]
     InvalidQty,
-    #[error("jumlah item tidak cukup (kamu punya {have})")]
+    #[error("Not enough items (you have {have})")]
     NotEnough { have: i64 },
     #[error(transparent)]
     Wallet(#[from] WalletError),

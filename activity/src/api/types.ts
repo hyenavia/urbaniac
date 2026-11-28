@@ -23,7 +23,7 @@ export interface MeProfileDto {
   balance: string;
   city_stage: CityStageKey;
   city_stage_name: string;
-  lang: "en" | "id";
+  lang?: string;
   slots_used: number;
   slot_capacity: number;
 }
@@ -34,6 +34,9 @@ export interface MeResponse {
   username: string;
   avatar_url: string | null;
   profile: MeProfileDto | null;
+  voice_boost_active?: boolean;
+  voice_boost_speed_pct?: number;
+  voice_boost_xp_pct?: number;
 }
 
 export interface FacilityDto {
@@ -167,16 +170,17 @@ export interface CitySnapshot {
   clockOffsetMs: number;
 }
 
-export type MockPreset = "kampung" | "desa" | "metropolis" | "unregistered";
+export type MockPreset =
+  | "kampung"
+  | "desa"
+  | "kota_kecil"
+  | "kota_dagang"
+  | "metropolis"
+  | "unregistered";
 
 export interface RegisterResponse {
   created: boolean;
   discord_user_id: string;
-}
-
-export interface SetLangResponse {
-  lang: "en" | "id";
-  label: string;
 }
 
 export interface CollectedItemDto {

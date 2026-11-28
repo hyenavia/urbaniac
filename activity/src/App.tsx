@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ApiError,
   assignCrew,
   cancelMarketListing,
   claimPending,
@@ -13,7 +14,6 @@ import {
   registerPlayer,
   sellToNpc,
   setCityTaxRate,
-  setPlayerLang,
   startActivity,
   startCityProject,
   startCraft,
@@ -21,7 +21,11 @@ import {
   upgradeCrew,
   withdrawTreasury,
 } from "./api/client";
-import { initDiscordAuth, type AuthSession } from "./api/discordAuth";
+import {
+  formatError,
+  initDiscordAuth,
+  type AuthSession,
+} from "./api/discordAuth";
 import { resetMockPreset } from "./api/mockData";
 import { connectEventStream, type StreamStatus } from "./api/sse";
 import type {
@@ -34,9 +38,14 @@ import { AdvancedPanels } from "./components/AdvancedPanels";
 import { CityPanels, type NavTab } from "./components/CityPanels";
 import { InspectorPanel } from "./components/InspectorPanel";
 import { TopHud } from "./components/TopHud";
-import { tr, type UiLang } from "./i18n";
+import { tr } from "./i18n";
 import { CityCanvas } from "./scene/CityCanvas";
 import type { MapSlotId } from "./scene/assetRegistry";
+
+function isAuthError(err: unknown): boolean {
+  if (err instanceof ApiError && err.status === 401) return true;
+  return /\b401\b|unauthori[sz]ed/i.test(formatError(err, ""));
+}
 
 export function App() {
   const [session, setSession] = useState<AuthSession | null>(null);
@@ -74,7 +83,7 @@ export function App() {
         setSnapshot(snap);
         setError(null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Gagal memuat data kota");
+        setError(formatError(err, "Failed to load city data"));
       } finally {
         setRefreshing(false);
         setLoading(false);
@@ -93,9 +102,7 @@ export function App() {
         await loadData(authSession, mockPreset);
       } catch (err) {
         if (cancelled) return;
-        setError(
-          err instanceof Error ? err.message : "Gagal menghubungkan ke Discord",
-        );
+        setError(formatError(err, "Failed to connect to Discord"));
         setLoading(false);
       }
     })();
@@ -104,12 +111,40 @@ export function App() {
     };
   }, []);
 
+  const handleRetry = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      let activeSession = session;
+      if (activeSession) {
+        try {
+          const snap = await fetchSnapshot(activeSession, mockPreset);
+          setSnapshot(snap);
+          return;
+        } catch (err) {
+          if (!isAuthError(err)) {
+            throw err;
+          }
+          activeSession = null;
+        }
+      }
+      const freshSession = await initDiscordAuth();
+      setSession(freshSession);
+      const snap = await fetchSnapshot(freshSession, mockPreset);
+      setSnapshot(snap);
+    } catch (err) {
+      setError(formatError(err, "Failed to connect to Discord"));
+    } finally {
+      setLoading(false);
+    }
+  }, [session, mockPreset]);
+
   useEffect(() => {
     const id = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
 
-  // Koneksi SSE real-time untuk menerima selesai aktivitas/proyek/crafting/market tick
+  // Real-time SSE connection for completed activities, projects, crafting, and market ticks
   const registered = Boolean(snapshot?.me.registered);
   useEffect(() => {
     if (!session || !registered) return;
@@ -127,7 +162,7 @@ export function App() {
     );
   }, [session, registered, mockPreset, loadData, showToast]);
 
-  // Refresh otomatis saat timer lokal aktivitas, proyek, atau crafting mencapai 0
+  // Auto-refresh when a local activity, project, or crafting timer reaches 0
   useEffect(() => {
     if (!session || !snapshot || !snapshot.me.registered || refreshing) return;
     const serverNow = nowMs + snapshot.clockOffsetMs;
@@ -162,10 +197,7 @@ export function App() {
         await loadData(session, mockPreset);
         showToast("ok", formatOk(res));
       } catch (err) {
-        showToast(
-          "err",
-          err instanceof Error ? err.message : "Aksi gagal dijalankan",
-        );
+        showToast("err", formatError(err, "Action failed"));
       } finally {
         setBusy(false);
       }
@@ -187,7 +219,7 @@ export function App() {
       <div className="center-screen">
         <div className="center-card">
           <h1>Urbaniac</h1>
-          <p className="muted">Menghubungkan kota visual ke Discord...</p>
+          <p className="muted">Connecting visual city to Discord...</p>
         </div>
       </div>
     );
@@ -197,16 +229,16 @@ export function App() {
     return (
       <div className="center-screen">
         <div className="center-card">
-          <h1>Koneksi Gagal</h1>
+          <h1>Connection Failed</h1>
           <p className="danger-text" style={{ fontSize: 13 }}>
             {error}
           </p>
           <button
             type="button"
             className="btn-ghost"
-            onClick={() => window.location.reload()}
+            onClick={() => void handleRetry()}
           >
-            Coba Lagi
+            Retry
           </button>
         </div>
       </div>
@@ -219,10 +251,10 @@ export function App() {
     return (
       <div className="center-screen">
         <div className="center-card">
-          <h1>Selamat Datang, {snapshot.me.username}!</h1>
+          <h1>Welcome, {snapshot.me.username}!</h1>
           <p className="muted">
-            Kotamu belum terdaftar. Buat kota Kampung pertamamu sekarang dan
-            dapatkan modal awal <strong>100.00 Bac</strong>.
+            Your city isn't registered yet. Found your first Hamlet now and
+            receive <strong>100.00 Bac</strong> in starting funds.
           </p>
           <div
             style={{
@@ -239,11 +271,11 @@ export function App() {
               onClick={() =>
                 void runAction(
                   (s) => registerPlayer(s, mockPreset),
-                  () => "Kota Kampung berhasil dibuat! Modal awal 100.00 Bac.",
+                  () => "Hamlet created! Starting funds: 100.00 Bac.",
                 )
               }
             >
-              {busy ? "Mendaftar..." : "Mulai Kota Baru (100 Bac)"}
+              {busy ? "Registering..." : "Start New City (100 Bac)"}
             </button>
             <button
               type="button"
@@ -251,7 +283,7 @@ export function App() {
               disabled={refreshing}
               onClick={() => session && void loadData(session, mockPreset)}
             >
-              Segarkan
+              Refresh
             </button>
             {session?.mode === "mock" && (
               <button
@@ -259,7 +291,7 @@ export function App() {
                 className="btn-ghost"
                 onClick={() => handlePresetChange("kampung")}
               >
-                Lihat Mock Kampung
+                View Mock Hamlet
               </button>
             )}
           </div>
@@ -268,8 +300,7 @@ export function App() {
     );
   }
 
-  const lang: UiLang = snapshot.me.profile?.lang ?? "id";
-  const labels = tr(lang);
+  const labels = tr();
   const readyCount =
     snapshot.activities?.runs.filter((r) => r.status === "ready").length ?? 0;
   const pendingCount = snapshot.inventory?.pending.length ?? 0;
@@ -280,15 +311,7 @@ export function App() {
         snapshot={snapshot}
         refreshing={refreshing}
         streamStatus={streamStatus}
-        lang={lang}
-        busy={busy}
         onRefresh={() => session && void loadData(session, mockPreset)}
-        onToggleLang={() =>
-          void runAction(
-            (s) => setPlayerLang(s, mockPreset),
-            (r) => `Bahasa diubah ke ${r.label}.`,
-          )
-        }
       />
 
       <main className="workspace">
@@ -304,10 +327,12 @@ export function App() {
                   handlePresetChange(e.target.value as MockPreset)
                 }
               >
-                <option value="kampung">Kampung (Awal)</option>
-                <option value="desa">Desa (Fishing)</option>
-                <option value="metropolis">Metropolis (Lengkap)</option>
-                <option value="unregistered">Belum /start</option>
+                <option value="kampung">Hamlet (Starter)</option>
+                <option value="desa">Village (Fishing)</option>
+                <option value="kota_kecil">Town (Cobble)</option>
+                <option value="kota_dagang">Trade City (Harbor)</option>
+                <option value="metropolis">Metropolis (Full)</option>
+                <option value="unregistered">Unregistered</option>
               </select>
               <button
                 type="button"
@@ -315,7 +340,7 @@ export function App() {
                 onClick={() => {
                   resetMockPreset(mockPreset);
                   void loadData(session, mockPreset);
-                  showToast("ok", "Data mock direset ke awal.");
+                  showToast("ok", "Mock data reset to initial state.");
                 }}
               >
                 Reset
@@ -359,20 +384,20 @@ export function App() {
               void runAction(
                 (s) => depositTreasury(s, mockPreset, amount, rid),
                 (r) =>
-                  `Setor berhasil. Treasury: ${r.treasury} Bac • Wallet: ${r.wallet_balance} Bac`,
+                  `Deposit successful. Treasury: ${r.treasury} Bac • Wallet: ${r.wallet_balance} Bac`,
               )
             }
             onWithdrawTreasury={(amount, rid) =>
               void runAction(
                 (s) => withdrawTreasury(s, mockPreset, amount, rid),
                 (r) =>
-                  `Tarik berhasil. Treasury: ${r.treasury} Bac • Wallet: ${r.wallet_balance} Bac`,
+                  `Withdrawal successful. Treasury: ${r.treasury} Bac • Wallet: ${r.wallet_balance} Bac`,
               )
             }
             onSetTaxRate={(pct) =>
               void runAction(
                 (s) => setCityTaxRate(s, mockPreset, pct),
-                (r) => `Tarif pajak kota diubah menjadi ${r.tax_rate_pct}%.`,
+                (r) => `City tax rate set to ${r.tax_rate_pct}%.`,
               )
             }
             onClaimPending={() =>
@@ -381,8 +406,8 @@ export function App() {
                 (r) => {
                   const total = r.claimed.reduce((acc, x) => acc + x.claimed, 0);
                   return total > 0
-                    ? `Berhasil mengklaim ${total} item dari Pending Claim.`
-                    : "Slot inventory masih penuh.";
+                    ? `Claimed ${total} item${total === 1 ? "" : "s"} from Pending Claim.`
+                    : "Inventory slots are still full.";
                 },
               )
             }
@@ -391,14 +416,14 @@ export function App() {
                 (s) => sellToNpc(s, mockPreset, params),
                 (r) =>
                   r.duplicate
-                    ? "Permintaan jual sudah diproses sebelumnya."
-                    : `Terjual ${r.qty}× ${r.name} (+${r.total_bac} Bac).`,
+                    ? "Sale request was already processed."
+                    : `Sold ${r.qty}× ${r.name} (+${r.total_bac} Bac).`,
               )
             }
             onStartActivity={(kind: ActivityKindKey) =>
               void runAction(
                 (s) => startActivity(s, mockPreset, kind),
-                (r) => `Aktivitas ${r.name} dimulai!`,
+                (r) => `${r.name} activity started!`,
               )
             }
             onCollectActivities={() =>
@@ -406,7 +431,7 @@ export function App() {
                 (s) => collectActivities(s, mockPreset),
                 (r) => {
                   if (r.collected.length === 0) {
-                    return "Belum ada reward aktivitas yang siap diambil.";
+                    return "No activity rewards ready to collect yet.";
                   }
                   const summary = r.collected
                     .map(
@@ -417,7 +442,7 @@ export function App() {
                           .join(", "),
                     )
                     .join(" | ");
-                  return `Reward diambil: ${summary}`;
+                  return `Collected rewards: ${summary}`;
                 },
               )
             }
@@ -439,50 +464,51 @@ export function App() {
               void runAction(
                 (s) => createMarketListing(s, mockPreset, params),
                 (r) =>
-                  `Listing ${r.name} ×${r.quantity} dipasang (fee ${r.listing_fee} Bac).`,
+                  `Listed ${r.name} ×${r.quantity} (fee ${r.listing_fee} Bac).`,
               )
             }
             onCancelListing={(listingId) =>
               void runAction(
                 (s) => cancelMarketListing(s, mockPreset, listingId),
-                (r) => `Listing ${r.name} dibatalkan (kembali ${r.stored + r.pending}).`,
+                (r) =>
+                  `Cancelled ${r.name} listing (returned ${r.stored + r.pending}).`,
               )
             }
             onStartCraft={(recipeId, batchQty) =>
               void runAction(
                 (s) => startCraft(s, mockPreset, recipeId, batchQty),
-                (r) => `Crafting ${r.name} ×${r.quantity} dimulai!`,
+                (r) => `Crafting ${r.name} ×${r.quantity} started!`,
               )
             }
             onToggleAutoSell={() =>
               void runAction(
                 (s) => toggleCraftAutoSell(s, mockPreset),
-                (r) => `Auto-Sell Craft: ${r.auto_sell ? "ON" : "OFF"}.`,
+                (r) => `Craft Auto-Sell: ${r.auto_sell ? "ON" : "OFF"}.`,
               )
             }
             onFulfillOrder={(orderId) =>
               void runAction(
                 (s) => fulfillCraftOrder(s, mockPreset, orderId),
                 (r) =>
-                  `Pesanan ${r.name} ×${r.quantity} selesai (+${r.reward_bac} Bac, +${r.rep_xp_gain} Rep).`,
+                  `Order ${r.name} ×${r.quantity} completed (+${r.reward_bac} Bac, +${r.rep_xp_gain} Rep).`,
               )
             }
             onRefreshOrders={() =>
               void runAction(
                 (s) => refreshCraftOrders(s, mockPreset),
-                () => "Daftar pesanan NPC diperbarui.",
+                () => "NPC orders refreshed.",
               )
             }
             onRecruitCrew={(rid) =>
               void runAction(
                 (s) => recruitCrew(s, mockPreset, rid),
-                (r) => `Berhasil merekrut ${r.name} (${r.rarity})!`,
+                (r) => `Recruited ${r.name} (${r.rarity})!`,
               )
             }
             onUpgradeCrew={(crewId, rid) =>
               void runAction(
                 (s) => upgradeCrew(s, mockPreset, crewId, rid),
-                (r) => `${r.name} naik ke Lv ${r.level}!`,
+                (r) => `${r.name} upgraded to Lv ${r.level}!`,
               )
             }
             onAssignCrew={(crewId, activity, autoEnabled) =>
@@ -490,8 +516,8 @@ export function App() {
                 (s) => assignCrew(s, mockPreset, crewId, activity, autoEnabled),
                 (r) =>
                   r.assigned_name
-                    ? `${r.name} ditugaskan ke ${r.assigned_name} (Auto: ${r.auto_enabled ? "ON" : "OFF"}).`
-                    : `${r.name} dilepas dari tugas.`,
+                    ? `${r.name} assigned to ${r.assigned_name} (Auto: ${r.auto_enabled ? "ON" : "OFF"}).`
+                    : `${r.name} unassigned.`,
               )
             }
           />
@@ -502,12 +528,11 @@ export function App() {
               snapshot={snapshot}
               nowMs={nowMs}
               busy={busy}
-              lang={lang}
               onClose={() => setSelectedSlot(null)}
               onStartActivity={(kind: ActivityKindKey) =>
                 void runAction(
                   (s) => startActivity(s, mockPreset, kind),
-                  (r) => `Aktivitas ${r.name} dimulai!`,
+                  (r) => `${r.name} activity started!`,
                 )
               }
               onCollectActivities={() =>
@@ -515,8 +540,8 @@ export function App() {
                   (s) => collectActivities(s, mockPreset),
                   (r) =>
                     r.collected.length === 0
-                      ? "Belum ada reward yang siap diambil."
-                      : `Berhasil mengambil ${r.collected.length} reward aktivitas.`,
+                      ? "No rewards ready to collect yet."
+                      : `Collected ${r.collected.length} activity reward${r.collected.length === 1 ? "" : "s"}.`,
                 )
               }
               onSellToNpc={(params) =>
@@ -524,14 +549,14 @@ export function App() {
                   (s) => sellToNpc(s, mockPreset, params),
                   (r) =>
                     r.duplicate
-                      ? "Permintaan jual sudah diproses sebelumnya."
-                      : `Terjual ${r.qty}× ${r.name} (+${r.total_bac} Bac).`,
+                      ? "Sale request was already processed."
+                      : `Sold ${r.qty}× ${r.name} (+${r.total_bac} Bac).`,
                 )
               }
               onStartProject={(facility: ProjectKey, rid: string) =>
                 void runAction(
                   (s) => startCityProject(s, mockPreset, facility, rid),
-                  (r) => `Proyek ${r.name} dimulai!`,
+                  (r) => `${r.name} project started!`,
                 )
               }
               onOpenMarket={() => {
@@ -546,17 +571,10 @@ export function App() {
       <nav className="bottom-nav">
         <button
           type="button"
-          className={activeTab === "map" ? "active" : ""}
-          onClick={() => setActiveTab("map")}
-        >
-          {labels.tabs.map}
-        </button>
-        <button
-          type="button"
           className={activeTab === "city" ? "active" : ""}
           onClick={() => {
             setSelectedSlot(null);
-            setActiveTab("city");
+            setActiveTab((prev) => (prev === "city" ? "map" : "city"));
           }}
         >
           {labels.tabs.city}
@@ -566,7 +584,9 @@ export function App() {
           className={activeTab === "inventory" ? "active" : ""}
           onClick={() => {
             setSelectedSlot(null);
-            setActiveTab("inventory");
+            setActiveTab((prev) =>
+              prev === "inventory" ? "map" : "inventory",
+            );
           }}
         >
           {labels.tabs.inventory}
@@ -577,7 +597,9 @@ export function App() {
           className={activeTab === "activities" ? "active" : ""}
           onClick={() => {
             setSelectedSlot(null);
-            setActiveTab("activities");
+            setActiveTab((prev) =>
+              prev === "activities" ? "map" : "activities",
+            );
           }}
         >
           {labels.tabs.activities}
@@ -588,7 +610,7 @@ export function App() {
           className={activeTab === "market" ? "active" : ""}
           onClick={() => {
             setSelectedSlot(null);
-            setActiveTab("market");
+            setActiveTab((prev) => (prev === "market" ? "map" : "market"));
           }}
         >
           {labels.tabs.market}
@@ -598,7 +620,7 @@ export function App() {
           className={activeTab === "crafting" ? "active" : ""}
           onClick={() => {
             setSelectedSlot(null);
-            setActiveTab("crafting");
+            setActiveTab((prev) => (prev === "crafting" ? "map" : "crafting"));
           }}
         >
           {labels.tabs.crafting}
@@ -608,7 +630,7 @@ export function App() {
           className={activeTab === "crew" ? "active" : ""}
           onClick={() => {
             setSelectedSlot(null);
-            setActiveTab("crew");
+            setActiveTab((prev) => (prev === "crew" ? "map" : "crew"));
           }}
         >
           {labels.tabs.crew}

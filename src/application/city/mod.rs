@@ -18,27 +18,27 @@ pub const JOB_CITY_ECONOMY_TICK: &str = "city_economy_tick";
 
 #[derive(Debug, thiserror::Error)]
 pub enum CityError {
-    #[error("profil belum ada, jalankan /start")]
+    #[error("No profile yet, run /start")]
     NotRegistered,
-    #[error("proyek {0} sudah berjalan")]
+    #[error("Project {0} is already in progress")]
     ProjectAlreadyRunning(String),
-    #[error("fasilitas {0} sudah mencapai level maksimal")]
+    #[error("Facility {0} has already reached maximum level")]
     AlreadyBuilt(&'static str),
-    #[error("proyek ini membutuhkan stage kota {}", .0.name())]
+    #[error("This project requires city stage {}", .0.name())]
     StageTooLow(CityStage),
-    #[error("prasyarat fasilitas belum terpenuhi")]
+    #[error("Facility prerequisites have not been met")]
     MissingPrerequisites,
-    #[error("proyek kenaikan stage ini sudah terlewati")]
+    #[error("This stage upgrade project has already been completed")]
     StageAlreadyAdvanced,
-    #[error("saldo Bac tidak cukup (butuh {need}, saldo {have})")]
+    #[error("Insufficient Bac balance (need {need}, have {have})")]
     InsufficientBac { need: Decimal, have: Decimal },
-    #[error("saldo City Treasury tidak cukup (butuh {need}, saldo {have})")]
+    #[error("Insufficient City Treasury balance (need {need}, have {have})")]
     InsufficientTreasury { need: Decimal, have: Decimal },
-    #[error("resource {name} tidak cukup (butuh {need}, punya {have})")]
+    #[error("Insufficient resource {name} (need {need}, have {have})")]
     InsufficientItem { name: &'static str, need: i64, have: i64 },
-    #[error("jumlah setoran harus lebih dari 0")]
+    #[error("Amount must be greater than 0")]
     InvalidAmount,
-    #[error("tarif pajak harus {MIN_TAX_RATE}%–{MAX_TAX_RATE}%")]
+    #[error("Tax rate must be between {MIN_TAX_RATE}% and {MAX_TAX_RATE}%")]
     InvalidTaxRate,
     #[error(transparent)]
     Wallet(#[from] WalletError),
@@ -491,38 +491,26 @@ pub async fn complete_project(
         (ProjectId::MetropolisTower, CityStage::KotaDagang) => Some(CityStage::Metropolis),
         _ => None,
     };
-    let lang = player_repo::get_lang(conn, proj.player_id)
-        .await
-        .unwrap_or(Lang::En);
     let mut extra = String::new();
     if let Some(ns) = next_stage {
         city_repo::set_stage(conn, proj.player_id, ns.as_str()).await?;
-        let s_name = stage_name(ns, lang);
-        extra = match lang {
-            Lang::En => format!(" Your city advanced to **{}**!", s_name),
-            Lang::Id => format!(" Kotamu naik ke stage **{}**!", s_name),
-        };
+        let s_name = stage_name(ns, Lang::En);
+        extra = format!(" Your city advanced to **{}**!", s_name);
         let flushed =
             crate::application::activities::flush_overflow_for_stage_conn(conn, proj.player_id, ns)
                 .await?;
         if !flushed.is_empty() {
             let ups = flushed
                 .into_iter()
-                .map(|(k, _, nl)| format!("{} -> Lv {nl}", activity_name(k, lang)))
+                .map(|(k, _, nl)| format!("{} -> Lv {nl}", activity_name(k, Lang::En)))
                 .collect::<Vec<_>>()
                 .join(", ");
-            match lang {
-                Lang::En => extra.push_str(&format!(" Overflow XP applied ({ups})!")),
-                Lang::Id => extra.push_str(&format!(" XP overflow diterapkan ({ups})!")),
-            }
+            extra.push_str(&format!(" Overflow XP applied ({ups})!"));
         }
     }
     city_repo::mark_project_completed(conn, project_run_id).await?;
-    let p_name = project_name(kind, lang);
-    let msg = match lang {
-        Lang::En => format!("🏗️ Project **{}** completed!{}", p_name, extra),
-        Lang::Id => format!("🏗️ Proyek **{}** selesai!{}", p_name, extra),
-    };
+    let p_name = project_name(kind, Lang::En);
+    let msg = format!("🏗️ Project **{}** completed!{}", p_name, extra);
     Ok(Some((proj.player_id, msg)))
 }
 
@@ -760,19 +748,10 @@ pub async fn run_city_economy_tick_conn(
         )
         .await?;
         if outcome.shortfall {
-            let lang = player_repo::get_lang(conn, c.player_id)
-                .await
-                .unwrap_or(Lang::En);
-            let msg = match lang {
-                Lang::En => format!(
-                    "⚠️ City treasury is empty! Welfare dropped to **{}%** (effectiveness **{}%**). Deposit Bac into Treasury in the **City** menu.",
-                    outcome.new_welfare, outcome.new_effectiveness_pct
-                ),
-                Lang::Id => format!(
-                    "⚠️ Treasury kota kosong! Welfare turun ke **{}%** (efektivitas **{}%**). Setor Bac ke Treasury di menu **Kota**.",
-                    outcome.new_welfare, outcome.new_effectiveness_pct
-                ),
-            };
+            let msg = format!(
+                "⚠️ City treasury is empty! Welfare dropped to **{}%** (effectiveness **{}%**). Deposit Bac into Treasury in the **City** menu.",
+                outcome.new_welfare, outcome.new_effectiveness_pct
+            );
             notes.push((c.player_id, msg));
         }
     }

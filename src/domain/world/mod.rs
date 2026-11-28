@@ -32,10 +32,10 @@ impl Season {
 
     pub fn name(&self) -> &'static str {
         match self {
-            Season::Spring => "Musim Semi",
-            Season::Summer => "Musim Panas",
-            Season::Autumn => "Musim Gugur",
-            Season::Winter => "Musim Dingin",
+            Season::Spring => "Spring",
+            Season::Summer => "Summer",
+            Season::Autumn => "Autumn",
+            Season::Winter => "Winter",
         }
     }
 
@@ -80,10 +80,10 @@ impl WorldEvent {
 
     pub fn name(&self) -> &'static str {
         match self {
-            WorldEvent::HarvestFestival => "Festival Panen",
-            WorldEvent::MerchantCaravan => "Karavan Dagang",
-            WorldEvent::StormShortage => "Badai Laut & Hutan",
-            WorldEvent::MiningBoom => "Demam Tambang",
+            WorldEvent::HarvestFestival => "Harvest Festival",
+            WorldEvent::MerchantCaravan => "Merchant Caravan",
+            WorldEvent::StormShortage => "Storm Shortage",
+            WorldEvent::MiningBoom => "Mining Boom",
         }
     }
 }

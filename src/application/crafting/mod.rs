@@ -1,3 +1,4 @@
+use crate::application::voice_boost::{apply_xp_bonus, VoiceBoostTracker};
 use crate::application::{city, inventory, market, player};
 use crate::domain::crafting::{
     apply_rep_bonus, apply_rep_xp, batch_duration_secs, craft_xp_per_unit, find_recipe,
@@ -20,21 +21,21 @@ pub const JOB_CRAFT_COMPLETE: &str = "craft_complete";
 
 #[derive(Debug, thiserror::Error)]
 pub enum CraftError {
-    #[error("profil belum ada, jalankan /start")]
+    #[error("No profile yet, run /start")]
     NotRegistered,
-    #[error("resep tidak dikenal")]
+    #[error("Unknown recipe")]
     UnknownRecipe,
-    #[error("jumlah crafting tidak valid")]
+    #[error("Invalid crafting quantity")]
     InvalidQty,
-    #[error("maksimal {0} crafting berjalan bersamaan")]
+    #[error("Maximum {0} concurrent crafts allowed")]
     TooManyCrafts(i64),
-    #[error("bahan {name} tidak cukup (butuh {need}, punya {have})")]
+    #[error("Not enough {name} (need {need}, have {have})")]
     MissingIngredient { name: &'static str, need: i64, have: i64 },
-    #[error("pesanan tidak ditemukan atau sudah selesai")]
+    #[error("Order not found or already completed")]
     OrderNotFound,
-    #[error("item {name} kurang untuk pesanan (butuh {need}, punya {have})")]
+    #[error("Not enough {name} for order (need {need}, have {have})")]
     InsufficientOrderItem { name: &'static str, need: i64, have: i64 },
-    #[error("tunggu {0} detik sebelum ganti pesanan lagi")]
+    #[error("Wait {0}s before refreshing orders again")]
     OrderRefreshCooldown(i64),
     #[error(transparent)]
     Wallet(#[from] WalletError),
@@ -179,6 +180,17 @@ pub async fn start_craft_batch(
     batch_qty: i64,
     duration_pct: i64,
 ) -> Result<CraftRunView, CraftError> {
+    start_craft_batch_with_bonus(pool, player_id, recipe_id, batch_qty, duration_pct, 0).await
+}
+
+pub async fn start_craft_batch_with_bonus(
+    pool: &PgPool,
+    player_id: i64,
+    recipe_id: &str,
+    batch_qty: i64,
+    duration_pct: i64,
+    extra_eff_pct: i64,
+) -> Result<CraftRunView, CraftError> {
     if !(1..=MAX_CRAFT_BATCH).contains(&batch_qty) {
         return Err(CraftError::InvalidQty);
     }
@@ -210,7 +222,7 @@ pub async fn start_craft_batch(
     }
     let raw_secs = apply_efficiency_duration(
         batch_duration_secs(recipe.duration_secs, batch_qty),
-        craft_eff_pct,
+        craft_eff_pct + extra_eff_pct,
     );
     let secs = (raw_secs * duration_pct.max(1) / 100).max(1);
     let (id, ends_at) = crafting_repo::insert_craft(
@@ -238,6 +250,14 @@ pub async fn complete_craft(
     conn: &mut PgConnection,
     craft_id: i64,
 ) -> anyhow::Result<Option<(i64, String)>> {
+    complete_craft_with_voice_boost(conn, craft_id, None).await
+}
+
+pub async fn complete_craft_with_voice_boost(
+    conn: &mut PgConnection,
+    craft_id: i64,
+    voice_boost: Option<&VoiceBoostTracker>,
+) -> anyhow::Result<Option<(i64, String)>> {
     let Some(job) = crafting_repo::lock_craft(conn, craft_id).await? else {
         return Ok(None);
     };
@@ -246,20 +266,8 @@ pub async fn complete_craft(
     }
     let recipe = find_recipe(&job.recipe_id)
         .ok_or_else(|| anyhow::anyhow!("resep tidak dikenal: {}", job.recipe_id))?;
-    let lang = player_repo::get_lang(conn, job.player_id)
-        .await
-        .unwrap_or(Lang::En);
-    let r_name = recipe_name(recipe.id, lang);
-    let mut note = match lang {
-        Lang::En => format!(
-            "⚒️ Crafting **{} × {}** completed!",
-            r_name, job.quantity
-        ),
-        Lang::Id => format!(
-            "⚒️ Crafting **{} × {}** selesai!",
-            r_name, job.quantity
-        ),
-    };
+    let r_name = recipe_name(recipe.id, Lang::En);
+    let mut note = format!("⚒️ Crafting **{} × {}** completed!", r_name, job.quantity);
     if let Some(item) = find_item(recipe.output_item_id) {
         if job.auto_sell {
             let unit = market::current_npc_price_conn(conn, item).await?;
@@ -267,23 +275,19 @@ pub async fn complete_craft(
             let reason = format!("auto_sell_craft:{}x{}", item.id, job.quantity);
             let key = format!("craft_autosell:{}", job.id);
             let _ = wallet_repo::apply(conn, job.player_id, total, &reason, &key).await?;
-            match lang {
-                Lang::En => note.push_str(" (automatically sold to NPC)"),
-                Lang::Id => note.push_str(" (otomatis terjual ke NPC)"),
-            }
+            note.push_str(" (automatically sold to NPC)");
         } else {
             let cap = inventory::slot_capacity_conn(conn, job.player_id).await?;
             let p = inventory_repo::add_item(conn, job.player_id, item, job.quantity, cap).await?;
             if p.pending > 0 {
-                match lang {
-                    Lang::En => note.push_str(" ⚠️ Inventory full — moved to **Pending Claim**!"),
-                    Lang::Id => note.push_str(" ⚠️ Inventory penuh — masuk **Pending Claim**!"),
-                }
+                note.push_str(" ⚠️ Inventory full — moved to **Pending Claim**!");
             }
         }
     }
     let batches = (job.quantity / recipe.output_qty.max(1)).max(1);
-    player::grant_xp_conn(conn, job.player_id, craft_xp_per_unit(recipe.tier) * batches).await?;
+    let xp_bonus_pct = voice_boost.map(|v| v.xp_bonus_pct(job.player_id)).unwrap_or(0);
+    let xp_gain = apply_xp_bonus(craft_xp_per_unit(recipe.tier) * batches, xp_bonus_pct);
+    player::grant_xp_conn(conn, job.player_id, xp_gain).await?;
     crafting_repo::mark_craft_completed(conn, craft_id).await?;
     Ok(Some((job.player_id, note)))
 }
@@ -292,6 +296,15 @@ pub async fn fulfill_order(
     pool: &PgPool,
     player_id: i64,
     order_id: i64,
+) -> Result<OrderFulfillSummary, CraftError> {
+    fulfill_order_with_xp_bonus(pool, player_id, order_id, 0).await
+}
+
+pub async fn fulfill_order_with_xp_bonus(
+    pool: &PgPool,
+    player_id: i64,
+    order_id: i64,
+    xp_bonus_pct: i64,
 ) -> Result<OrderFulfillSummary, CraftError> {
     let mut tx = pool.begin().await?;
     if !player_repo::lock(&mut *tx, player_id).await? {
@@ -327,7 +340,8 @@ pub async fn fulfill_order(
     inventory_repo::remove_item(&mut *tx, player_id, item.id, order.quantity).await?;
     let (new_lvl, new_xp) = apply_rep_xp(rep.level, rep.xp, order.rep_xp);
     crafting_repo::update_shop_rep(&mut *tx, player_id, new_lvl, new_xp).await?;
-    player::grant_xp_conn(&mut *tx, player_id, ORDER_PLAYER_XP_PER_UNIT * order.quantity).await?;
+    let player_xp = apply_xp_bonus(ORDER_PLAYER_XP_PER_UNIT * order.quantity, xp_bonus_pct);
+    player::grant_xp_conn(&mut *tx, player_id, player_xp).await?;
     crafting_repo::mark_order_fulfilled(&mut *tx, order.id).await?;
     ensure_orders_conn(&mut *tx, player_id).await?;
     tx.commit().await?;

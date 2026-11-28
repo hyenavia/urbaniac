@@ -19,16 +19,16 @@ export interface MapSlotSpec {
   roofColor: number;
   wallColor: number;
   accentColor: number;
-  /** Disiapkan untuk Tahap 3+/aset final tanpa mengubah logika scene */
+  /** Prepared for Phase 3+/final assets without changing scene logic */
   spriteUrl?: string;
 }
 
 export const MAP_SLOTS: MapSlotSpec[] = [
-  // Zona Aktivitas
+  // Activity Zones
   {
     id: "mining",
     category: "activity",
-    label: "Tambang",
+    label: "Mine",
     shortCode: "MINE",
     x: 245,
     y: 155,
@@ -43,7 +43,7 @@ export const MAP_SLOTS: MapSlotSpec[] = [
   {
     id: "gathering",
     category: "activity",
-    label: "Hutan",
+    label: "Forest",
     shortCode: "WOOD",
     x: 215,
     y: 355,
@@ -58,7 +58,7 @@ export const MAP_SLOTS: MapSlotSpec[] = [
   {
     id: "farming",
     category: "activity",
-    label: "Ladang",
+    label: "Farm",
     shortCode: "FARM",
     x: 245,
     y: 555,
@@ -73,7 +73,7 @@ export const MAP_SLOTS: MapSlotSpec[] = [
   {
     id: "fishing",
     category: "activity",
-    label: "Dermaga",
+    label: "Pier",
     shortCode: "FISH",
     x: 915,
     y: 410,
@@ -86,11 +86,11 @@ export const MAP_SLOTS: MapSlotSpec[] = [
     accentColor: 0x9be2ff,
   },
 
-  // Pasar NPC
+  // NPC Market
   {
     id: "market_npc",
     category: "market",
-    label: "Pasar NPC",
+    label: "NPC Market",
     shortCode: "NPC",
     x: 755,
     y: 555,
@@ -103,11 +103,11 @@ export const MAP_SLOTS: MapSlotSpec[] = [
     accentColor: 0xffd166,
   },
 
-  // 7 Slot Fasilitas Kota
+  // 7 City Facility Slots
   {
     id: "metropolis_tower",
     category: "facility",
-    label: "Menara Metro",
+    label: "Metro Tower",
     shortCode: "MTR",
     x: 560,
     y: 165,
@@ -122,7 +122,7 @@ export const MAP_SLOTS: MapSlotSpec[] = [
   {
     id: "city_hall",
     category: "facility",
-    label: "Balai Kota",
+    label: "Town Hall",
     shortCode: "CITY",
     x: 735,
     y: 235,
@@ -137,7 +137,7 @@ export const MAP_SLOTS: MapSlotSpec[] = [
   {
     id: "town_hall",
     category: "facility",
-    label: "Balai Kampung",
+    label: "Village Hall",
     shortCode: "HALL",
     x: 560,
     y: 345,
@@ -152,7 +152,7 @@ export const MAP_SLOTS: MapSlotSpec[] = [
   {
     id: "well",
     category: "facility",
-    label: "Sumur",
+    label: "Well",
     shortCode: "WELL",
     x: 410,
     y: 445,
@@ -167,7 +167,7 @@ export const MAP_SLOTS: MapSlotSpec[] = [
   {
     id: "granary",
     category: "facility",
-    label: "Lumbung",
+    label: "Granary",
     shortCode: "GRAN",
     x: 425,
     y: 255,
@@ -182,7 +182,7 @@ export const MAP_SLOTS: MapSlotSpec[] = [
   {
     id: "market_hall",
     category: "facility",
-    label: "Pasar Desa",
+    label: "Market Hall",
     shortCode: "MKTH",
     x: 725,
     y: 390,
@@ -197,7 +197,7 @@ export const MAP_SLOTS: MapSlotSpec[] = [
   {
     id: "trade_port",
     category: "facility",
-    label: "Pelabuhan",
+    label: "Trade Port",
     shortCode: "PORT",
     x: 925,
     y: 575,

@@ -65,10 +65,10 @@ export function AdvancedPanels({
 
   const title =
     tab === "market"
-      ? "Pasar Dinamis & Makelar"
+      ? "Dynamic Market & Broker"
       : tab === "crafting"
-        ? "Crafting & Pesanan NPC"
-        : "Kru & Automasi";
+        ? "Crafting & NPC Orders"
+        : "Crew & Automation";
 
   const selectedInvItem = inventory?.items.find((i) => i.item_id === listItemId);
   const parsedListQty = Math.max(1, Math.floor(Number(listQty) || 1));
@@ -83,7 +83,7 @@ export function AdvancedPanels({
       <div className="panel-header">
         <h2>{title}</h2>
         <button type="button" className="btn-ghost" onClick={onClose}>
-          Peta
+          Close
         </button>
       </div>
 
@@ -92,9 +92,9 @@ export function AdvancedPanels({
           <>
             <div className="card">
               <h3>
-                Kalender Dunia — Hari {market.calendar.day} ({market.calendar.season_name})
+                World Calendar — Day {market.calendar.day} ({market.calendar.season_name})
               </h3>
-              <p className="muted">Bonus Musim: {market.calendar.season_hint}</p>
+              <p className="muted">Season Bonus: {market.calendar.season_hint}</p>
               {market.calendar.active_event_name && (
                 <div className="kv-row">
                   <span className="pill pill-gold">
@@ -105,7 +105,7 @@ export function AdvancedPanels({
               )}
               {market.calendar.trend_item_name && (
                 <div className="kv-row">
-                  <span>Item Tren (+15%)</span>
+                  <span>Trending Item (+15%)</span>
                   <strong className="ok-text">
                     {market.calendar.trend_item_name}
                   </strong>
@@ -115,14 +115,14 @@ export function AdvancedPanels({
 
             <div className="card">
               <h3>
-                Buat Listing Makelar ({market.listings.length} / {market.max_listings})
+                Create Broker Listing ({market.listings.length} / {market.max_listings})
               </h3>
               <p className="muted">
-                Fee {market.fee_pct}% di muka (min 0.50 Bac) • Komisi{" "}
-                {market.commission_pct}% saat terjual.
+                Upfront fee {market.fee_pct}% (min 0.50 Bac) •{" "}
+                {market.commission_pct}% commission on sale.
               </p>
               {!inventory || inventory.items.length === 0 ? (
-                <p className="muted">Inventory kosong; tidak ada item untuk dititipkan.</p>
+                <p className="muted">Inventory is empty; no items to list.</p>
               ) : (
                 <>
                   <select
@@ -137,7 +137,7 @@ export function AdvancedPanels({
                   >
                     {inventory.items.map((it) => (
                       <option key={it.item_id} value={it.item_id}>
-                        {it.name} (Stok {it.quantity} • NPC {it.npc_unit_price})
+                        {it.name} (Stock {it.quantity} • NPC {it.npc_unit_price})
                       </option>
                     ))}
                   </select>
@@ -160,7 +160,7 @@ export function AdvancedPanels({
                       style={{ flex: 1 }}
                       value={listPrice}
                       onChange={(e) => setListPrice(e.target.value)}
-                      placeholder="Harga target"
+                      placeholder="Target price"
                     />
                     <select
                       className="input-field"
@@ -169,13 +169,13 @@ export function AdvancedPanels({
                         setListDur(e.target.value as "2h" | "6h" | "24h")
                       }
                     >
-                      <option value="2h">2 Jam</option>
-                      <option value="6h">6 Jam</option>
-                      <option value="24h">24 Jam</option>
+                      <option value="2h">2 Hours</option>
+                      <option value="6h">6 Hours</option>
+                      <option value="24h">24 Hours</option>
                     </select>
                   </div>
                   <div className="kv-row">
-                    <span className="muted">Estimasi Fee</span>
+                    <span className="muted">Estimated Fee</span>
                     <span className="mono">{estFee} Bac</span>
                   </div>
                   <button
@@ -196,16 +196,16 @@ export function AdvancedPanels({
                       })
                     }
                   >
-                    Pasang Listing
+                    Post Listing
                   </button>
                 </>
               )}
             </div>
 
             <div className="card">
-              <h3>Listing Aktif ({market.listings.length})</h3>
+              <h3>Active Listings ({market.listings.length})</h3>
               {market.listings.length === 0 ? (
-                <p className="muted">Belum ada listing aktif.</p>
+                <p className="muted">No active listings yet.</p>
               ) : (
                 market.listings.map((l) => (
                   <div className="list-item" key={l.id}>
@@ -224,7 +224,7 @@ export function AdvancedPanels({
                       disabled={busy}
                       onClick={() => onCancelListing(l.id)}
                     >
-                      Batalkan
+                      Cancel
                     </button>
                   </div>
                 ))
@@ -232,13 +232,13 @@ export function AdvancedPanels({
             </div>
 
             <div className="card">
-              <h3>Harga Pasar NPC Terkini</h3>
+              <h3>Current NPC Market Prices</h3>
               {market.prices.map((p) => (
                 <div className="list-item" key={p.item_id}>
                   <div>
                     <strong>{p.name}</strong>
                     <div className="muted">
-                      Dasar {p.base_price} • ×{p.multiplier}
+                      Base {p.base_price} • ×{p.multiplier}
                     </div>
                   </div>
                   <strong className="mono">{p.current_price} Bac</strong>
@@ -252,7 +252,7 @@ export function AdvancedPanels({
           <>
             <div className="card">
               <div className="kv-row">
-                <h3>Reputasi Toko (Lv {crafting.rep_level})</h3>
+                <h3>Shop Reputation (Lv {crafting.rep_level})</h3>
                 <button
                   type="button"
                   disabled={busy}
@@ -265,27 +265,27 @@ export function AdvancedPanels({
                 </button>
               </div>
               <div className="kv-row">
-                <span>XP Reputasi</span>
+                <span>Reputation XP</span>
                 <span className="mono">
                   {crafting.rep_xp} / {crafting.rep_xp_needed}
                 </span>
               </div>
               <div className="kv-row">
-                <span>Bonus Pesanan NPC</span>
+                <span>NPC Order Bonus</span>
                 <span className="mono ok-text">+{crafting.rep_bonus_pct}%</span>
               </div>
               <div className="kv-row">
-                <span>Pesanan Selesai</span>
+                <span>Orders Completed</span>
                 <span className="mono">{crafting.completed_orders}</span>
               </div>
             </div>
 
             <div className="card">
               <h3>
-                Antrean Crafting ({crafting.running.length} / {crafting.max_concurrent})
+                Crafting Queue ({crafting.running.length} / {crafting.max_concurrent})
               </h3>
               {crafting.running.length === 0 ? (
-                <p className="muted">Tidak ada crafting berjalan.</p>
+                <p className="muted">No crafting in progress.</p>
               ) : (
                 crafting.running.map((r) => (
                   <div className="list-item" key={r.id}>
@@ -294,7 +294,7 @@ export function AdvancedPanels({
                         {r.name} ×{r.quantity}
                       </strong>
                       {r.auto_sell && (
-                        <div className="muted">Auto-sell aktif</div>
+                        <div className="muted">Auto-sell enabled</div>
                       )}
                     </div>
                     <span className="mono warn-text">
@@ -307,14 +307,14 @@ export function AdvancedPanels({
 
             <div className="card">
               <div className="kv-row">
-                <h3>Pesanan NPC</h3>
+                <h3>NPC Orders</h3>
                 <button
                   type="button"
                   className="btn-ghost btn-sm"
                   disabled={busy}
                   onClick={onRefreshOrders}
                 >
-                  Ganti Pesanan
+                  Refresh Orders
                 </button>
               </div>
               {crafting.orders.map((o) => (
@@ -324,7 +324,7 @@ export function AdvancedPanels({
                       {o.name} ×{o.quantity}
                     </strong>
                     <div className="muted">
-                      Stok {o.have}/{o.quantity} • +{o.reward_bac} Bac • +{o.rep_xp} Rep
+                      Stock {o.have}/{o.quantity} • +{o.reward_bac} Bac • +{o.rep_xp} Rep
                     </div>
                   </div>
                   <button
@@ -333,14 +333,14 @@ export function AdvancedPanels({
                     disabled={busy || !o.can_fulfill}
                     onClick={() => onFulfillOrder(o.id)}
                   >
-                    Penuhi
+                    Fulfill
                   </button>
                 </div>
               ))}
             </div>
 
             <div className="card">
-              <h3>Katalog Resep</h3>
+              <h3>Recipe Catalog</h3>
               {crafting.recipes.map((r) => {
                 const rawBatch = craftBatches[r.id] ?? "1";
                 const batch = Math.max(
@@ -357,13 +357,13 @@ export function AdvancedPanels({
                       <div>
                         <strong>{r.name}</strong>
                         <div className="muted">
-                          {r.tier_name} • {r.duration_secs}d • +{r.xp_per_unit} XP
+                          {r.tier_name} • {r.duration_secs}s • +{r.xp_per_unit} XP
                         </div>
                       </div>
-                      <span className="mono muted">Maks {r.max_batches}×</span>
+                      <span className="mono muted">Max {r.max_batches}×</span>
                     </div>
                     <div className="muted">
-                      Bahan:{" "}
+                      Inputs:{" "}
                       {r.inputs
                         .map((inp) => `${inp.name} ${inp.have}/${inp.need}`)
                         .join(", ")}
@@ -408,7 +408,7 @@ export function AdvancedPanels({
             <div className="card">
               <div className="kv-row">
                 <h3>
-                  Daftar Kru ({crew.members.length} / {crew.max_slots})
+                  Crew Roster ({crew.members.length} / {crew.max_slots})
                 </h3>
                 <button
                   type="button"
@@ -416,18 +416,18 @@ export function AdvancedPanels({
                   disabled={busy || crew.members.length >= crew.max_slots}
                   onClick={() => onRecruitCrew(newRequestId())}
                 >
-                  Rekrut ({crew.recruit_cost} Bac)
+                  Recruit ({crew.recruit_cost} Bac)
                 </button>
               </div>
               <p className="muted">
-                Kru memberi bonus Efficiency, Yield, & Luck serta otomasi aktivitas
-                tanpa memakai Activity Slot tambahan.
+                Crew provide Efficiency, Yield, & Luck bonuses plus activity
+                automation without using extra Activity Slots.
               </p>
             </div>
 
             {crew.members.length === 0 ? (
               <div className="card">
-                <p className="muted">Belum ada kru. Rekrut kru pertamamu di atas.</p>
+                <p className="muted">No crew members yet. Recruit your first crew member above.</p>
               </div>
             ) : (
               crew.members.map((m) => {
@@ -441,7 +441,7 @@ export function AdvancedPanels({
                           {m.name} (Lv {m.level}/{crew.max_level})
                         </strong>
                         <div className="muted">
-                          {m.rarity} • Spesialis {m.specialty_name}
+                          {m.rarity} • {m.specialty_name} Specialist
                         </div>
                       </div>
                       {m.upgrade_cost && (
@@ -474,10 +474,10 @@ export function AdvancedPanels({
                           onAssignCrew(m.id, next, next ? m.auto_enabled : false);
                         }}
                       >
-                        <option value="">Tidak Ditugaskan</option>
+                        <option value="">Unassigned</option>
                         {unlockedActs.map((a) => (
                           <option key={a.kind} value={a.kind}>
-                            Tugas: {a.name}
+                            Assign: {a.name}
                           </option>
                         ))}
                       </select>

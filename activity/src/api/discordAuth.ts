@@ -5,6 +5,36 @@ export interface AuthSession {
   accessToken: string;
 }
 
+let cachedSdk: DiscordSDK | null = null;
+let cachedClientId: string | null = null;
+
+export function getDiscordSdk(clientId: string): DiscordSDK {
+  if (!cachedSdk || cachedClientId !== clientId) {
+    cachedSdk = new DiscordSDK(clientId);
+    cachedClientId = clientId;
+  }
+  return cachedSdk;
+}
+
+export function formatError(err: unknown, fallback: string): string {
+  if (err instanceof Error) {
+    return err.message.trim() || fallback;
+  }
+  if (typeof err === "string") {
+    return err.trim() || fallback;
+  }
+  if (typeof err === "object" && err !== null) {
+    const obj = err as { code?: unknown; message?: unknown };
+    const msg = typeof obj.message === "string" ? obj.message.trim() : "";
+    const code =
+      obj.code !== undefined && obj.code !== null ? String(obj.code).trim() : "";
+    if (msg && code) return `${msg} (${code})`;
+    if (msg) return msg;
+    if (code) return `Error (${code})`;
+  }
+  return fallback;
+}
+
 async function resolveLiveClientId(envClientId: string): Promise<string> {
   if (envClientId) return envClientId;
   try {
@@ -16,7 +46,7 @@ async function resolveLiveClientId(envClientId: string): Promise<string> {
       }
     }
   } catch {
-    // Abaikan, akan ditangani pesan error di bawah jika tetap kosong
+    // Ignore; handled below if client ID remains empty.
   }
   return "";
 }
@@ -31,10 +61,10 @@ export async function initDiscordAuth(): Promise<AuthSession> {
     mockFlag === "true" || (!inDiscordFrame && mockFlag !== "false");
 
   if (useMock) {
-    // Jika dibuka di dalam Discord lewat Cloudflare Tunnel saat dev PC,
-    // tetap panggil ready() bila Client ID tersedia agar loading screen Discord selesai.
+    // When opened inside Discord via tunnel during local dev,
+    // still call ready() if Client ID is available so Discord's loading screen clears.
     if (inDiscordFrame && envClientId) {
-      const sdk = new DiscordSDK(envClientId);
+      const sdk = getDiscordSdk(envClientId);
       await sdk.ready();
     }
     return { mode: "mock", accessToken: "mock-token" };
@@ -42,18 +72,18 @@ export async function initDiscordAuth(): Promise<AuthSession> {
 
   if (!inDiscordFrame) {
     throw new Error(
-      "Mode live membutuhkan Discord Activity iframe (frame_id). Aktifkan VITE_USE_MOCK_API=true untuk uji di browser biasa.",
+      "Live mode requires a Discord Activity iframe (frame_id). Set VITE_USE_MOCK_API=true to test in a regular browser.",
     );
   }
 
   const clientId = await resolveLiveClientId(envClientId);
   if (!clientId) {
     throw new Error(
-      "DISCORD_CLIENT_ID / VITE_DISCORD_CLIENT_ID belum diisi di konfigurasi.",
+      "DISCORD_CLIENT_ID / VITE_DISCORD_CLIENT_ID is not configured.",
     );
   }
 
-  const discordSdk = new DiscordSDK(clientId);
+  const discordSdk = getDiscordSdk(clientId);
   await discordSdk.ready();
 
   const { code } = await discordSdk.commands.authorize({
@@ -71,12 +101,12 @@ export async function initDiscordAuth(): Promise<AuthSession> {
   });
 
   if (!tokenRes.ok) {
-    let msg = `Gagal menukar token Discord (HTTP ${tokenRes.status})`;
+    let msg = `Failed to exchange Discord token (HTTP ${tokenRes.status})`;
     try {
       const body = (await tokenRes.json()) as { error?: { message?: string } };
       if (body.error?.message) msg = body.error.message;
     } catch {
-      // Abaikan parse error body non-JSON
+      // Ignore non-JSON error body
     }
     throw new Error(msg);
   }

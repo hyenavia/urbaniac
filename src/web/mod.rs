@@ -5,6 +5,7 @@ pub mod events;
 pub mod rate_limit;
 pub mod routes;
 
+use crate::application::voice_boost::VoiceBoostTracker;
 use crate::config::ActivityConfig;
 use crate::web::auth::{DiscordAuthProvider, HttpDiscordAuth};
 use crate::web::events::EventHub;
@@ -33,6 +34,7 @@ pub struct WebState {
     pub rate_limiter: Arc<RateLimiter>,
     pub events: Arc<EventHub>,
     pub client_id: String,
+    pub voice_boost: Arc<VoiceBoostTracker>,
 }
 
 pub fn build_router(state: Arc<WebState>, static_dir: Option<&Path>) -> Router {
@@ -103,6 +105,7 @@ pub async fn run(
     notify: Arc<Notify>,
     activity_duration_pct: i64,
     events: Arc<EventHub>,
+    voice_boost: Arc<VoiceBoostTracker>,
 ) -> anyhow::Result<()> {
     let client_id = cfg
         .client_id
@@ -120,6 +123,7 @@ pub async fn run(
         rate_limiter: Arc::new(RateLimiter::default()),
         events,
         client_id,
+        voice_boost,
     });
 
     let static_path = Path::new(&cfg.static_dir);
@@ -207,6 +211,7 @@ mod tests {
             rate_limiter: Arc::new(RateLimiter::default()),
             events: Arc::new(EventHub::default()),
             client_id: "test-client-id".to_string(),
+            voice_boost: Arc::new(VoiceBoostTracker::disabled()),
         });
         build_router(state, None)
     }

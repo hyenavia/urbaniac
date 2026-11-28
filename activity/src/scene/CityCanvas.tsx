@@ -1,13 +1,22 @@
 import { useEffect, useRef, useState } from "react";
-import { Application, Container, Graphics, Text, TextStyle } from "pixi.js";
+import {
+  Application,
+  Container,
+  Graphics,
+  Sprite,
+  Text,
+  TextStyle,
+  TilingSprite,
+} from "pixi.js";
 import type {
   ActivityCatalogDto,
+  ActivityKindKey,
   ActivityRunDto,
   CitySnapshot,
   CityStageKey,
   ProjectQuoteDto,
 } from "../api/types";
-import { slotLabel, type UiLang } from "../i18n";
+import { slotLabel } from "../i18n";
 import {
   MAP_SLOTS,
   WORLD_HEIGHT,
@@ -15,6 +24,32 @@ import {
   type MapSlotId,
   type MapSlotSpec,
 } from "./assetRegistry";
+import { PIXEL_SCALE, PixelTextureCache } from "./pixelArt";
+import {
+  getPadlockIconTexture,
+  getSelectionRingTexture,
+  getSlotSpriteAsset,
+  getStatusIconTexture,
+} from "./pixelBuildings";
+import {
+  CORE_TERRAIN_H,
+  CORE_TERRAIN_OFFSET_X,
+  CORE_TERRAIN_OFFSET_Y,
+  RIVER_TILE_LEFT_WORLD_X,
+  getCoreTerrainTexture,
+  getGrassTileTexture,
+  getPropTextures,
+  getRiverBankTileTexture,
+  getStageProps,
+  getWaterTileTexture,
+} from "./pixelTerrain";
+import {
+  type RoadNodeId,
+  type VillagerAgent,
+  getVillagerTexture,
+  reconcileVillagers,
+  stepVillagers,
+} from "./pixelVillagers";
 
 interface CityCanvasProps {
   snapshot: CitySnapshot;
@@ -52,7 +87,11 @@ function resolveSlotState(
 
   if (spec.category === "market") {
     const count = snapshot.inventory?.items.length ?? 0;
-    return { kind: "built", level: 1, subLabel: `${count} item` };
+    return {
+      kind: "built",
+      level: 1,
+      subLabel: `${count} item${count === 1 ? "" : "s"}`,
+    };
   }
 
   if (spec.category === "activity") {
@@ -66,13 +105,13 @@ function resolveSlotState(
       activities?.runs.filter((r) => r.kind === spec.id) ?? [];
     const readyRun = matchingRuns.find((r) => r.status === "ready");
     if (readyRun) {
-      return { kind: "ready", subLabel: "SIAP!" };
+      return { kind: "ready", subLabel: "READY!" };
     }
     const runningRun = matchingRuns.find((r) => r.status === "running");
     if (runningRun) {
       const endsAtMs = Date.parse(runningRun.ends_at);
       const totalMs = Math.max(1000, (cat?.base_duration_secs ?? 300) * 1000);
-      return { kind: "running", subLabel: "Aktif", endsAtMs, totalMs };
+      return { kind: "running", subLabel: "Active", endsAtMs, totalMs };
     }
     const prog = activities?.progress.find((p) => p.kind === spec.id);
     return {
@@ -93,7 +132,7 @@ function resolveSlotState(
     const totalMs = Math.max(1000, (quote?.duration_secs ?? 300) * 1000);
     return {
       kind: "building",
-      subLabel: "Dibangun",
+      subLabel: "Building",
       endsAtMs,
       totalMs,
     };
@@ -107,123 +146,193 @@ function resolveSlotState(
     };
   }
 
-  if (
-    city &&
-    quote &&
-    !stageGte(city.stage, quote.min_stage)
-  ) {
+  if (city && quote && !stageGte(city.stage, quote.min_stage)) {
     return { kind: "locked", subLabel: quote.min_stage_name };
   }
 
-  return { kind: "unbuilt", subLabel: "Kosong" };
-}
-
-function drawTerrain(world: Container, stage: CityStageKey): void {
-  const bg = new Graphics();
-  const bleedX = 1400;
-  const bleedY = 1200;
-
-  // Full-bleed meadow so wide/tall screens never show dark borders
-  bg.rect(
-    -bleedX,
-    -bleedY,
-    WORLD_WIDTH + bleedX * 2,
-    WORLD_HEIGHT + bleedY * 2,
-  ).fill({ color: 0x264430 });
-
-  // Subtle grass contour patches
-  bg.ellipse(220, 410, 420, 310).fill({ color: 0x2c4f37, alpha: 0.72 });
-  bg.ellipse(570, 335, 260, 180).fill({ color: 0x32593e, alpha: 0.65 });
-  bg.ellipse(-180, 260, 260, 220).fill({ color: 0x223e2b, alpha: 0.7 });
-  bg.ellipse(160, 860, 380, 200).fill({ color: 0x223e2b, alpha: 0.65 });
-
-  // Northern rocky quarry terrace (Mining zone, extended north-west)
-  bg.roundRect(-240, -260, 710, 470, 36)
-    .fill({ color: 0x333e4c })
-    .stroke({ color: 0x4b596b, width: 2 });
-  bg.ellipse(245, 130, 145, 58).fill({ color: 0x3e4b5b, alpha: 0.85 });
-
-  // Eastern river & harbor water (Fishing & Trade Port, full-bleed east)
-  bg.poly([
-    850, -bleedY,
-    WORLD_WIDTH + bleedX, -bleedY,
-    WORLD_WIDTH + bleedX, WORLD_HEIGHT + bleedY,
-    810, WORLD_HEIGHT + bleedY,
-    815, WORLD_HEIGHT,
-    835, 510,
-    875, 340,
-    830, 160,
-  ])
-    .fill({ color: 0x1d4d6d })
-    .stroke({ color: 0x3d82a8, width: 3 });
-  bg.poly([
-    890, -bleedY,
-    WORLD_WIDTH + bleedX, -bleedY,
-    WORLD_WIDTH + bleedX, WORLD_HEIGHT + bleedY,
-    860, WORLD_HEIGHT + bleedY,
-    890, 510,
-    920, 340,
-    875, 160,
-  ]).fill({ color: 0x25628a, alpha: 0.55 });
-
-  // Central town plaza
-  const plazaRadius = stageGte(stage, "kota_kecil") ? 145 : 108;
-  bg.ellipse(560, 360, plazaRadius, plazaRadius * 0.62)
-    .fill({ color: 0x5c5346, alpha: 0.85 })
-    .stroke({ color: 0x7b6f5e, width: 2 });
-
-  // Connecting dirt / stone paths
-  const roads: Array<[number, number, number, number]> = [
-    [560, 360, 245, 555],
-    [560, 360, 215, 355],
-    [560, 360, 245, 155],
-    [560, 360, 410, 445],
-    [560, 360, 425, 255],
-    [560, 360, 560, 165],
-    [560, 360, 725, 390],
-    [560, 360, 735, 235],
-    [725, 390, 755, 555],
-    [725, 390, 915, 410],
-    [755, 555, 925, 575],
-  ];
-  for (const [x1, y1, x2, y2] of roads) {
-    bg.moveTo(x1, y1)
-      .lineTo(x2, y2)
-      .stroke({ color: 0x6f604e, width: 14, cap: "round", alpha: 0.82 });
-  }
-
-  // Decorative trees near forest & outer meadow
-  const treeSpots = [
-    [95, 290],
-    [130, 420],
-    [105, 480],
-    [320, 295],
-    [140, 625],
-    [450, 625],
-    [-40, 340],
-    [-70, 520],
-    [40, 690],
-    [360, 720],
-    [620, 690],
-  ];
-  for (const [tx, ty] of treeSpots) {
-    bg.ellipse(tx, ty + 14, 18, 8).fill({ color: 0x0e1812, alpha: 0.35 });
-    bg.roundRect(tx - 4, ty - 6, 8, 20, 2).fill({ color: 0x5e412c });
-    bg.circle(tx, ty - 12, 16).fill({ color: 0x3b7638 });
-    bg.circle(tx - 5, ty - 16, 11).fill({ color: 0x56964c });
-  }
-
-  world.addChild(bg);
+  return { kind: "unbuilt", subLabel: "Empty" };
 }
 
 interface LiveBar {
   fill: Graphics;
+  hi: Graphics;
   x: number;
   y: number;
   width: number;
   endsAtMs: number;
   totalMs: number;
   color: number;
+  hiColor: number;
+}
+
+interface BobbingNode {
+  node: Container;
+  baseY: number;
+  phase: number;
+}
+
+interface AmbientDrift {
+  gfx: Graphics;
+  originX: number;
+  originY: number;
+  phase: number;
+  kind: "butterfly" | "smoke";
+}
+
+/** 16-bit Stardew parchment/wood plaque with crisp pixel bevel */
+function drawPixelPlaque(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  colors: {
+    fill: number;
+    border: number;
+    hi: number;
+    lo: number;
+  },
+): Graphics {
+  const g = new Graphics();
+  // Outer dark-umber border
+  g.rect(x, y, w, h).fill({ color: colors.border });
+  // Inner fill
+  g.rect(x + 2, y + 2, w - 4, h - 4).fill({ color: colors.fill });
+  // Top & left highlight bevel
+  g.rect(x + 2, y + 2, w - 4, 2).fill({ color: colors.hi });
+  g.rect(x + 2, y + 2, 2, h - 4).fill({ color: colors.hi });
+  // Bottom & right shade bevel
+  g.rect(x + 2, y + h - 4, w - 4, 2).fill({ color: colors.lo });
+  g.rect(x + w - 4, y + 2, 2, h - 4).fill({ color: colors.lo });
+  // Pixel corner rivets
+  g.rect(x + 4, y + 4, 2, 2).fill({ color: colors.lo });
+  g.rect(x + w - 6, y + 4, 2, 2).fill({ color: colors.lo });
+  return g;
+}
+
+function drawTerrain(
+  world: Container,
+  stage: CityStageKey,
+  cache: PixelTextureCache,
+): { riverBg: TilingSprite; ambients: AmbientDrift[] } {
+  const bleedX = 1800;
+  const bleedY = 1400;
+
+  // 1. Full-bleed meadow grass TilingSprite
+  const grassBg = new TilingSprite({
+    texture: getGrassTileTexture(cache, stage),
+    width: WORLD_WIDTH + bleedX * 2,
+    height: WORLD_HEIGHT + bleedY * 2,
+  });
+  grassBg.position.set(-bleedX, -bleedY);
+  grassBg.tileScale.set(PIXEL_SCALE, PIXEL_SCALE);
+  grassBg.zIndex = -1000;
+  grassBg.roundPixels = true;
+  world.addChild(grassBg);
+
+  // 2. Full-bleed eastern animated river TilingSprite
+  const riverBg = new TilingSprite({
+    texture: getWaterTileTexture(cache, 0),
+    width: WORLD_WIDTH + bleedX - RIVER_TILE_LEFT_WORLD_X,
+    height: WORLD_HEIGHT + bleedY * 2,
+  });
+  riverBg.position.set(RIVER_TILE_LEFT_WORLD_X, -bleedY);
+  riverBg.tileScale.set(PIXEL_SCALE, PIXEL_SCALE);
+  riverBg.zIndex = -900;
+  riverBg.roundPixels = true;
+  world.addChild(riverBg);
+
+  // 3. Seamless river shoreline strips beyond core terrain vertical bounds (tall viewports)
+  const coreTopY = CORE_TERRAIN_OFFSET_Y;
+  const coreBotY = CORE_TERRAIN_OFFSET_Y + CORE_TERRAIN_H * PIXEL_SCALE;
+  const bankTex = getRiverBankTileTexture(cache, stage);
+  const bankX = 852 - 12 * PIXEL_SCALE;
+
+  const northBank = new TilingSprite({
+    texture: bankTex,
+    width: 16 * PIXEL_SCALE,
+    height: coreTopY - -bleedY,
+  });
+  northBank.position.set(bankX, -bleedY);
+  northBank.tileScale.set(PIXEL_SCALE, PIXEL_SCALE);
+  northBank.zIndex = -810;
+  world.addChild(northBank);
+
+  const southBank = new TilingSprite({
+    texture: bankTex,
+    width: 16 * PIXEL_SCALE,
+    height: WORLD_HEIGHT + bleedY - coreBotY,
+  });
+  southBank.position.set(bankX, coreBotY);
+  southBank.tileScale.set(PIXEL_SCALE, PIXEL_SCALE);
+  southBank.zIndex = -810;
+  world.addChild(southBank);
+
+  // 4. Baked Stardew 3/4 core terrain (quarry cliff, shoreline, plaza, dirt/stone roads)
+  const coreSprite = new Sprite(getCoreTerrainTexture(cache, stage));
+  coreSprite.position.set(CORE_TERRAIN_OFFSET_X, CORE_TERRAIN_OFFSET_Y);
+  coreSprite.scale.set(PIXEL_SCALE, PIXEL_SCALE);
+  coreSprite.zIndex = -800;
+  coreSprite.roundPixels = true;
+  world.addChild(coreSprite);
+
+  // 5. Y-sorted stage scenery props (trees, cottages, townhouses, skyline towers, harbor ships)
+  const propTextures = getPropTextures(cache);
+  for (const spot of getStageProps(stage)) {
+    const prop = new Sprite(propTextures[spot.kind]);
+    const isWaterProp = spot.kind === "sailboat" || spot.kind === "steamship";
+    prop.anchor.set(0.5, isWaterProp ? 0.78 : 0.9);
+    prop.scale.set(PIXEL_SCALE, PIXEL_SCALE);
+    prop.position.set(spot.x, spot.y);
+    prop.zIndex = isWaterProp ? -500 + spot.y : spot.y;
+    prop.roundPixels = true;
+    world.addChild(prop);
+  }
+
+  // 6. Lightweight ambient meadow butterflies & cozy chimney smoke puffs
+  const ambients: AmbientDrift[] = [];
+  const butterflySpots: Array<[number, number, number]> = [
+    [335, 480, 0xffe680],
+    [480, 290, 0x9be2ff],
+    [640, 495, 0xf28aa8],
+  ];
+  butterflySpots.forEach(([bx, by, col], idx) => {
+    const g = new Graphics();
+    g.rect(-2, -1, 2, 2).fill({ color: col });
+    g.rect(1, -1, 2, 2).fill({ color: col });
+    g.rect(0, 0, 1, 2).fill({ color: 0x2d1a0e });
+    g.position.set(bx, by);
+    g.zIndex = 2000;
+    world.addChild(g);
+    ambients.push({
+      gfx: g,
+      originX: bx,
+      originY: by,
+      phase: idx * 1.9,
+      kind: "butterfly",
+    });
+  });
+
+  const smokeSpots: Array<[number, number]> = [
+    [560 + 34, 345 - 98],
+    [215 + 24, 355 - 86],
+  ];
+  smokeSpots.forEach(([sx, sy], idx) => {
+    const g = new Graphics();
+    g.rect(-3, -2, 6, 4).fill({ color: 0xf7f1e1, alpha: 0.72 });
+    g.rect(-2, -4, 4, 2).fill({ color: 0xffffff, alpha: 0.55 });
+    g.position.set(sx, sy);
+    g.zIndex = 2000;
+    world.addChild(g);
+    ambients.push({
+      gfx: g,
+      originX: sx,
+      originY: sy,
+      phase: idx * 2.4,
+      kind: "smoke",
+    });
+  });
+
+  return { riverBg, ambients };
 }
 
 function drawSlotNode(
@@ -231,7 +340,9 @@ function drawSlotNode(
   state: SlotVisualState,
   selected: boolean,
   liveBars: LiveBar[],
-  lang: UiLang,
+  bobbing: BobbingNode[],
+  cache: PixelTextureCache,
+  stage: CityStageKey,
 ): Container {
   const root = new Container();
   root.x = spec.x;
@@ -240,219 +351,207 @@ function drawSlotNode(
   root.eventMode = "static";
   root.cursor = "pointer";
 
-  const g = new Graphics();
-  const halfW = spec.width / 2;
-  const halfD = spec.depth / 2;
-
-  // Ground shadow / footprint
-  g.ellipse(0, 6, halfW * 0.96, halfD * 0.72).fill({
-    color: 0x0b111b,
-    alpha: state.kind === "locked" ? 0.25 : 0.48,
-  });
-
   if (selected) {
-    g.ellipse(0, 4, halfW * 1.08, halfD * 0.84).stroke({
-      color: 0xffd166,
-      width: 3.5,
-      alpha: 0.95,
-    });
+    const ring = new Sprite(getSelectionRingTexture(cache, spec.width, spec.depth));
+    ring.anchor.set(0.5, 0.5);
+    ring.scale.set(PIXEL_SCALE, PIXEL_SCALE);
+    ring.position.set(0, 4);
+    root.addChild(ring);
   }
 
+  const level = state.kind === "built" ? state.level : 1;
+  const asset = getSlotSpriteAsset(cache, spec, state.kind, level, stage);
+  const bSprite = new Sprite(asset.texture);
+  bSprite.anchor.set(asset.anchorX, asset.anchorY);
+  bSprite.scale.set(PIXEL_SCALE, PIXEL_SCALE);
+  bSprite.roundPixels = true;
   if (state.kind === "locked") {
-    g.roundRect(-halfW * 0.82, -spec.wallHeight * 0.65, spec.width * 0.82, spec.wallHeight * 0.65 + halfD * 0.35, 10)
-      .fill({ color: 0x26303d, alpha: 0.65 })
-      .stroke({ color: 0x4b586b, width: 1.5, alpha: 0.7 });
-  } else if (state.kind === "unbuilt") {
-    g.roundRect(-halfW * 0.84, -halfD * 0.56, spec.width * 0.84, spec.depth * 0.62, 10)
-      .fill({ color: 0x3b4439, alpha: 0.55 })
-      .stroke({ color: 0xa8b6c8, width: 2, alpha: 0.65 });
-    // Corner stakes
-    for (const [sx, sy] of [
-      [-halfW * 0.74, -halfD * 0.44],
-      [halfW * 0.74, -halfD * 0.44],
-      [-halfW * 0.74, halfD * 0.36],
-      [halfW * 0.74, halfD * 0.36],
-    ]) {
-      g.roundRect(sx - 3, sy - 10, 6, 12, 2).fill({ color: 0xa87955 });
-    }
-  } else if (state.kind === "building") {
-    const h = Math.max(36, spec.wallHeight * 0.85);
-    const w = spec.width * 0.82;
-    g.roundRect(-w / 2, -h, w, h + 10, 8)
-      .fill({ color: 0x624d3b, alpha: 0.9 })
-      .stroke({ color: 0xffd166, width: 2, alpha: 0.85 });
-    // Scaffold crossbars
-    g.moveTo(-w / 2 + 8, -h + 8)
-      .lineTo(w / 2 - 8, 2)
-      .moveTo(w / 2 - 8, -h + 8)
-      .lineTo(-w / 2 + 8, 2)
-      .stroke({ color: 0xffd166, width: 2, alpha: 0.7 });
-  } else {
-    // 3/4 View building (built / running / ready)
-    const levelBoost =
-      spec.id === "granary" && state.kind === "built"
-        ? (state.level - 1) * 9
-        : 0;
-    const wallH = spec.wallHeight + levelBoost;
-    const w = spec.width * 0.86;
-    const roofH = spec.roofHeight;
-
-    // Front wall (darker shade in 3/4 view)
-    g.roundRect(-w / 2, -wallH, w, wallH + 10, 6)
-      .fill({ color: spec.wallColor })
-      .stroke({ color: 0x121824, width: 2, alpha: 0.65 });
-
-    // Roof overhang (angled top face)
-    g.poly([
-      -w / 2 - 8, -wallH + 2,
-      -w / 2 + 12, -wallH - roofH,
-      w / 2 - 12, -wallH - roofH,
-      w / 2 + 8, -wallH + 2,
-    ])
-      .fill({ color: spec.roofColor })
-      .stroke({ color: 0x121824, width: 2, alpha: 0.6 });
-
-    // Roof ridge highlight
-    g.moveTo(-w / 2 + 14, -wallH - roofH + 5)
-      .lineTo(w / 2 - 14, -wallH - roofH + 5)
-      .stroke({ color: 0xffffff, width: 2, alpha: 0.25 });
-
-    // Door & accent window
-    const doorW = Math.min(24, w * 0.22);
-    const doorH = Math.min(26, wallH * 0.55);
-    g.roundRect(-doorW / 2, 10 - doorH, doorW, doorH, 4).fill({
-      color: 0x241c18,
-      alpha: 0.85,
-    });
-    if (w >= 100 && wallH >= 32) {
-      g.roundRect(-w * 0.33, -wallH * 0.6, 14, 12, 2).fill({
-        color: spec.accentColor,
-        alpha: 0.85,
-      });
-      g.roundRect(w * 0.33 - 14, -wallH * 0.6, 14, 12, 2).fill({
-        color: spec.accentColor,
-        alpha: 0.85,
-      });
-    }
+    bSprite.alpha = 0.86;
   }
+  root.addChild(bSprite);
 
-  root.addChild(g);
-
-  // Label pill underneath
-  const titleText = slotLabel(spec.id, lang);
-  const topLabelY = 24;
-  const pill = new Graphics();
-  const pillW = Math.max(102, titleText.length * 8.2 + 26);
-  pill.roundRect(-pillW / 2, topLabelY, pillW, 24, 12)
-    .fill({ color: 0x121824, alpha: 0.9 })
-    .stroke({
-      color: selected ? 0xffd166 : 0x3b4d66,
-      width: selected ? 2 : 1.2,
-    });
-  root.addChild(pill);
+  // Cozy Stardew wooden/parchment nameplate plaque below building
+  const titleText = slotLabel(spec.id);
+  const topLabelY = 26;
+  const plaqueW = Math.max(98, Math.round(titleText.length * 8.2 + 26));
+  const plaque = drawPixelPlaque(
+    -Math.round(plaqueW / 2),
+    topLabelY,
+    plaqueW,
+    24,
+    selected
+      ? {
+          fill: 0xffe494,
+          border: 0x2d1a0e,
+          hi: 0xfff8dc,
+          lo: 0xd99b2e,
+        }
+      : state.kind === "locked"
+        ? {
+            fill: 0x52463f,
+            border: 0x2d1a0e,
+            hi: 0x706158,
+            lo: 0x3b312c,
+          }
+        : {
+            fill: 0xf5ddb0,
+            border: 0x3b2010,
+            hi: 0xfff4d9,
+            lo: 0xc99f65,
+          },
+  );
+  root.addChild(plaque);
 
   const labelText = new Text({
     text: titleText,
     style: new TextStyle({
       fontFamily: "system-ui, -apple-system, Segoe UI, sans-serif",
       fontSize: 12,
-      fontWeight: "700",
-      fill: state.kind === "locked" ? 0x8d9aad : 0xeef2f6,
+      fontWeight: "800",
+      fill: state.kind === "locked" ? 0xd9cdb8 : 0x3b2010,
     }),
   });
   labelText.anchor.set(0.5, 0.5);
-  labelText.x = 0;
-  labelText.y = topLabelY + 12;
+  labelText.position.set(0, topLabelY + 12);
   root.addChild(labelText);
 
-  // Status badge above building
-  const badgeY =
-    state.kind === "unbuilt"
-      ? -34
-      : state.kind === "locked"
-        ? -spec.wallHeight * 0.65 - 16
-        : -spec.wallHeight - spec.roofHeight - 16;
+  // Status badge / progress meter above building
+  const badgeY = asset.badgeOffsetY;
 
   if (state.kind === "ready") {
-    const badge = new Graphics();
-    badge
-      .roundRect(-36, badgeY - 12, 72, 22, 11)
-      .fill({ color: 0xffd166 })
-      .stroke({ color: 0x121824, width: 1.5 });
-    root.addChild(badge);
+    const bobWrap = new Container();
+    bobWrap.position.set(0, badgeY);
+
+    const badge = drawPixelPlaque(-42, -13, 84, 24, {
+      fill: 0xf5c242,
+      border: 0x2d1a0e,
+      hi: 0xfff0a3,
+      lo: 0xc2871e,
+    });
+    bobWrap.addChild(badge);
+
+    const star = new Sprite(getStatusIconTexture(cache, "ready"));
+    star.anchor.set(0.5, 0.5);
+    star.scale.set(1.5, 1.5);
+    star.position.set(-28, -1);
+    bobWrap.addChild(star);
+
     const t = new Text({
-      text: "SIAP!",
+      text: "READY!",
       style: new TextStyle({
         fontFamily: "system-ui, -apple-system, Segoe UI, sans-serif",
         fontSize: 11,
-        fontWeight: "800",
-        fill: 0x121824,
+        fontWeight: "900",
+        fill: 0x2d1a0e,
       }),
     });
     t.anchor.set(0.5, 0.5);
-    t.y = badgeY - 1;
-    root.addChild(t);
+    t.position.set(9, -1);
+    bobWrap.addChild(t);
+
+    root.addChild(bobWrap);
+    bobbing.push({ node: bobWrap, baseY: badgeY, phase: spec.x * 0.02 });
   } else if (state.kind === "running" || state.kind === "building") {
-    const barW = 86;
+    const barW = 90;
+    const barH = 14;
     const barX = -barW / 2;
     const barY = badgeY - 6;
-    const track = new Graphics();
-    track
-      .roundRect(barX, barY, barW, 11, 5)
-      .fill({ color: 0x121824, alpha: 0.92 })
-      .stroke({ color: 0x4b5e78, width: 1 });
-    root.addChild(track);
+
+    // Wooden-framed chunky pixel meter
+    const frame = drawPixelPlaque(barX, barY, barW, barH, {
+      fill: 0x422414,
+      border: 0x2d1a0e,
+      hi: 0x8c522d,
+      lo: 0x2d1a0e,
+    });
+    root.addChild(frame);
 
     const fill = new Graphics();
+    const hi = new Graphics();
     root.addChild(fill);
+    root.addChild(hi);
+
     liveBars.push({
       fill,
-      x: barX + 1.5,
-      y: barY + 1.5,
-      width: barW - 3,
+      hi,
+      x: barX + 3,
+      y: barY + 3,
+      width: barW - 6,
       endsAtMs: state.endsAtMs,
       totalMs: state.totalMs,
-      color: state.kind === "building" ? 0xffd166 : 0xff914d,
+      color: state.kind === "building" ? 0xf5b83d : 0x6eb846,
+      hiColor: state.kind === "building" ? 0xffe680 : 0xa4d66b,
     });
+
+    // Bobbing activity tool micro-icon above progress bar
+    const iconKind =
+      state.kind === "building"
+        ? "hammer"
+        : spec.id === "mining"
+          ? "pickaxe"
+          : spec.id === "gathering"
+            ? "axe"
+            : spec.id === "farming"
+              ? "sprout"
+              : "fish";
+    const toolWrap = new Container();
+    const toolBaseY = barY - 12;
+    toolWrap.position.set(0, toolBaseY);
+    const toolIcon = new Sprite(getStatusIconTexture(cache, iconKind));
+    toolIcon.anchor.set(0.5, 0.5);
+    toolIcon.scale.set(PIXEL_SCALE, PIXEL_SCALE);
+    toolWrap.addChild(toolIcon);
+    root.addChild(toolWrap);
+    bobbing.push({ node: toolWrap, baseY: toolBaseY, phase: spec.y * 0.03 });
   } else if (state.kind === "locked") {
-    const lockBg = new Graphics();
-    const txt = `🔒 ${state.subLabel}`;
-    const lw = Math.max(72, txt.length * 7 + 16);
-    lockBg
-      .roundRect(-lw / 2, badgeY - 10, lw, 20, 10)
-      .fill({ color: 0x17202e, alpha: 0.92 })
-      .stroke({ color: 0x46566e, width: 1 });
-    root.addChild(lockBg);
+    const txt = state.subLabel;
+    const lw = Math.max(76, Math.round(txt.length * 6.8 + 26));
+    const lockPlaque = drawPixelPlaque(-Math.round(lw / 2), badgeY - 10, lw, 20, {
+      fill: 0x4b5666,
+      border: 0x2d1a0e,
+      hi: 0x677586,
+      lo: 0x343e4c,
+    });
+    root.addChild(lockPlaque);
+
+    const lockIcon = new Sprite(getPadlockIconTexture(cache));
+    lockIcon.anchor.set(0, 0.5);
+    lockIcon.scale.set(1.3, 1.3);
+    lockIcon.position.set(-Math.round(lw / 2) + 6, badgeY);
+    root.addChild(lockIcon);
+
     const t = new Text({
       text: txt,
       style: new TextStyle({
         fontFamily: "system-ui, -apple-system, Segoe UI, sans-serif",
         fontSize: 10.5,
-        fontWeight: "600",
-        fill: 0xa8b6c8,
+        fontWeight: "700",
+        fill: 0xf2dcb1,
       }),
     });
     t.anchor.set(0.5, 0.5);
-    t.y = badgeY;
+    t.position.set(7, badgeY);
     root.addChild(t);
   } else if (state.kind === "built" && spec.category === "facility") {
-    const lvBg = new Graphics();
-    lvBg
-      .roundRect(-24, badgeY - 10, 48, 20, 10)
-      .fill({ color: 0x1f3329, alpha: 0.95 })
-      .stroke({ color: 0x79b85c, width: 1.3 });
-    root.addChild(lvBg);
+    const lvPlaque = drawPixelPlaque(-25, badgeY - 10, 50, 20, {
+      fill: 0x4c8038,
+      border: 0x2d1a0e,
+      hi: 0x85bd54,
+      lo: 0x335825,
+    });
+    root.addChild(lvPlaque);
+
     const t = new Text({
       text: state.subLabel,
       style: new TextStyle({
         fontFamily: "system-ui, -apple-system, Segoe UI, sans-serif",
         fontSize: 11,
-        fontWeight: "700",
-        fill: 0x8cd06e,
+        fontWeight: "800",
+        fill: 0xfff4d9,
       }),
     });
     t.anchor.set(0.5, 0.5);
-    t.y = badgeY;
+    t.position.set(0, badgeY);
     root.addChild(t);
   }
 
@@ -478,7 +577,16 @@ export function CityCanvas({
   const hostRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<Application | null>(null);
   const worldRef = useRef<Container | null>(null);
+  const cacheRef = useRef<PixelTextureCache | null>(null);
   const liveBarsRef = useRef<LiveBar[]>([]);
+  const bobbingRef = useRef<BobbingNode[]>([]);
+  const ambientsRef = useRef<AmbientDrift[]>([]);
+  const villagersRef = useRef<VillagerAgent[]>([]);
+  const activeRoadNodesRef = useRef<Set<RoadNodeId>>(
+    new Set(["plaza_c", "plaza_w", "plaza_e"]),
+  );
+  const riverBgRef = useRef<TilingSprite | null>(null);
+  const animTickRef = useRef(0);
   const onSelectRef = useRef(onSelectSlot);
   onSelectRef.current = onSelectSlot;
 
@@ -497,7 +605,10 @@ export function CityCanvas({
   const applyCamera = () => {
     const world = worldRef.current;
     if (!world) return;
-    world.position.set(camRef.current.x, camRef.current.y);
+    world.position.set(
+      Math.round(camRef.current.x),
+      Math.round(camRef.current.y),
+    );
     world.scale.set(camRef.current.scale);
   };
 
@@ -581,15 +692,40 @@ export function CityCanvas({
     clampCamera();
   };
 
+  const updateLiveBars = (clockOffsetMs: number) => {
+    const serverNow = Date.now() + clockOffsetMs;
+    for (const bar of liveBarsRef.current) {
+      const rem = Math.max(0, bar.endsAtMs - serverNow);
+      const pct = Math.max(
+        0.08,
+        Math.min(1, 1 - rem / Math.max(1000, bar.totalMs)),
+      );
+      const w = Math.max(4, Math.round(bar.width * pct));
+      bar.fill.clear();
+      bar.fill.rect(bar.x, bar.y, w, 8).fill({ color: bar.color });
+      bar.hi.clear();
+      bar.hi.rect(bar.x, bar.y, w, 2).fill({ color: bar.hiColor });
+    }
+  };
+
   const renderWorld = (snap: CitySnapshot, sel: MapSlotId | null) => {
     const world = worldRef.current;
-    if (!world) return;
-    world.removeChildren();
+    const cache = cacheRef.current;
+    if (!world || !cache) return;
+
+    const removed = world.removeChildren();
+    for (const child of removed) {
+      child.destroy({ children: true, texture: false });
+    }
     liveBarsRef.current = [];
+    bobbingRef.current = [];
+    ambientsRef.current = [];
+    riverBgRef.current = null;
 
     const stage = snap.city?.stage ?? "kampung";
-    const lang: UiLang = snap.me.profile?.lang ?? "id";
-    drawTerrain(world, stage);
+    const { riverBg, ambients } = drawTerrain(world, stage, cache);
+    riverBgRef.current = riverBg;
+    ambientsRef.current = ambients;
 
     for (const spec of MAP_SLOTS) {
       const st = resolveSlotState(spec, snap);
@@ -598,7 +734,9 @@ export function CityCanvas({
         st,
         sel === spec.id,
         liveBarsRef.current,
-        lang,
+        bobbingRef.current,
+        cache,
+        stage,
       );
       node.on("pointerup", () => {
         if (!dragRef.current.moved) {
@@ -608,25 +746,58 @@ export function CityCanvas({
       world.addChild(node);
     }
 
+    // Reconcile walking townsfolk & running activity workers without resetting positions
+    const activeNodes = new Set<RoadNodeId>([
+      "plaza_c",
+      "plaza_w",
+      "plaza_e",
+      "town_hall",
+      "market_hall",
+      "market_npc",
+      "mining",
+      "gathering",
+      "farming",
+    ]);
+    const fishingCat = snap.activities?.catalog.find((c) => c.kind === "fishing");
+    if (fishingCat?.unlocked) {
+      activeNodes.add("fishing");
+    }
+    for (const fac of snap.city?.facilities ?? []) {
+      if (fac.level > 0) {
+        activeNodes.add(fac.id as RoadNodeId);
+      }
+    }
+    activeRoadNodesRef.current = activeNodes;
+
+    const runningKinds = new Set<ActivityKindKey>(
+      (snap.activities?.runs ?? [])
+        .filter((r) => r.status === "running")
+        .map((r) => r.kind),
+    );
+    villagersRef.current = reconcileVillagers(
+      villagersRef.current,
+      stage,
+      activeNodes,
+      runningKinds,
+    );
+    for (const agent of villagersRef.current) {
+      const vSprite = new Sprite(
+        getVillagerTexture(cache, agent.role, agent.variant, 0),
+      );
+      vSprite.anchor.set(0.5, 0.92);
+      vSprite.position.set(Math.round(agent.x), Math.round(agent.y));
+      vSprite.scale.set(agent.facing * PIXEL_SCALE, PIXEL_SCALE);
+      vSprite.zIndex = Math.round(agent.y);
+      vSprite.roundPixels = true;
+      vSprite.eventMode = "none";
+      agent.sprite = vSprite;
+      world.addChild(vSprite);
+    }
+
     updateLiveBars(snap.clockOffsetMs);
   };
 
-  const updateLiveBars = (clockOffsetMs: number) => {
-    const serverNow = Date.now() + clockOffsetMs;
-    for (const bar of liveBarsRef.current) {
-      const rem = Math.max(0, bar.endsAtMs - serverNow);
-      const pct = Math.max(
-        0.08,
-        Math.min(1, 1 - rem / Math.max(1000, bar.totalMs)),
-      );
-      bar.fill.clear();
-      bar.fill
-        .roundRect(bar.x, bar.y, bar.width * pct, 8, 4)
-        .fill({ color: bar.color });
-    }
-  };
-
-  // Keep latest snapshot accessible inside init callback
+  // Keep latest snapshot accessible inside init & timer callbacks
   const latestRef = useRef({ snapshot, selectedSlot });
   latestRef.current = { snapshot, selectedSlot };
 
@@ -636,18 +807,22 @@ export function CityCanvas({
 
     let disposed = false;
     const app = new Application();
+    const cache = new PixelTextureCache();
+    cacheRef.current = cache;
 
     (async () => {
       await app.init({
         resizeTo: el,
-        background: 0x264430,
-        antialias: true,
+        background: 0x6ca646,
+        antialias: false,
+        roundPixels: true,
         resolution: Math.min(window.devicePixelRatio || 1, 2),
         autoDensity: true,
       });
 
       if (disposed) {
         app.destroy(true, { children: true });
+        cache.destroyAll();
         return;
       }
 
@@ -671,6 +846,9 @@ export function CityCanvas({
       const entry = entries[0];
       if (!entry || !camRef.current.initialized) return;
       const { width, height } = entry.contentRect;
+      if (width > 0 && height > 0 && appRef.current) {
+        appRef.current.resize();
+      }
       const nextFit = getFitScale(width, height);
       if (Math.abs(camRef.current.scale - lastFitScaleRef.current) < 0.015) {
         camRef.current.scale = nextFit;
@@ -680,9 +858,57 @@ export function CityCanvas({
     });
     ro.observe(el);
 
+    // Stepped 16-bit animation & progress ticker (every 100ms)
     const timer = window.setInterval(() => {
-      updateLiveBars(latestRef.current.snapshot.clockOffsetMs);
-    }, 1000);
+      animTickRef.current += 1;
+      const tick = animTickRef.current;
+
+      if (cacheRef.current && villagersRef.current.length > 0) {
+        stepVillagers(
+          villagersRef.current,
+          activeRoadNodesRef.current,
+          cacheRef.current,
+        );
+      }
+
+      if (tick % 10 === 0) {
+        updateLiveBars(latestRef.current.snapshot.clockOffsetMs);
+      }
+
+      // River 2-frame pixel shimmer every 700ms
+      if (riverBgRef.current && cacheRef.current && tick % 7 === 0) {
+        const frame = (Math.floor(tick / 7) % 2) as 0 | 1;
+        riverBgRef.current.texture = getWaterTileTexture(cacheRef.current, frame);
+      }
+
+      if (tick % 2 === 0) {
+        const step = Math.floor(tick / 2);
+        // Stepped integer bobbing for READY! and active tool micro-icons
+        const bobOffsets = [0, -2, -3, -2];
+        for (const b of bobbingRef.current) {
+          const idx = Math.floor(step + b.phase) % bobOffsets.length;
+          b.node.y = b.baseY + bobOffsets[(idx + bobOffsets.length) % bobOffsets.length];
+        }
+
+        // Gentle ambient meadow butterflies & chimney smoke
+        for (const amb of ambientsRef.current) {
+          const t = step * 0.45 + amb.phase;
+          if (amb.kind === "butterfly") {
+            amb.gfx.position.set(
+              Math.round(amb.originX + Math.sin(t * 0.7) * 14),
+              Math.round(amb.originY + Math.cos(t * 1.1) * 7),
+            );
+          } else {
+            const cycle = (step * 0.22 + amb.phase) % 6;
+            amb.gfx.position.set(
+              Math.round(amb.originX + Math.sin(cycle * 1.2) * 4),
+              Math.round(amb.originY - cycle * 4),
+            );
+            amb.gfx.alpha = Math.max(0.15, 0.75 - cycle * 0.1);
+          }
+        }
+      }
+    }, 100);
 
     return () => {
       disposed = true;
@@ -692,8 +918,16 @@ export function CityCanvas({
         appRef.current.destroy(true, { children: true });
         appRef.current = null;
       }
+      if (cacheRef.current) {
+        cacheRef.current.destroyAll();
+        cacheRef.current = null;
+      }
       worldRef.current = null;
+      riverBgRef.current = null;
       liveBarsRef.current = [];
+      bobbingRef.current = [];
+      ambientsRef.current = [];
+      villagersRef.current = [];
     };
   }, []);
 
@@ -741,13 +975,13 @@ export function CityCanvas({
       }}
     >
       <div className="camera-controls" onPointerDown={(e) => e.stopPropagation()}>
-        <button type="button" onClick={() => zoomBy(1.15)} title="Perbesar">
+        <button type="button" onClick={() => zoomBy(1.15)} title="Zoom In">
           +
         </button>
-        <button type="button" onClick={() => zoomBy(0.87)} title="Perkecil">
+        <button type="button" onClick={() => zoomBy(0.87)} title="Zoom Out">
           -
         </button>
-        <button type="button" onClick={resetCamera} title="Reset Kamera">
+        <button type="button" onClick={resetCamera} title="Reset Camera">
           Reset
         </button>
       </div>

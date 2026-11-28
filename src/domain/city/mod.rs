@@ -33,10 +33,10 @@ impl CityStage {
 
     pub fn name(&self) -> &'static str {
         match self {
-            CityStage::Kampung => "Kampung",
-            CityStage::Desa => "Desa",
-            CityStage::KotaKecil => "Kota Kecil",
-            CityStage::KotaDagang => "Kota Dagang",
+            CityStage::Kampung => "Hamlet",
+            CityStage::Desa => "Village",
+            CityStage::KotaKecil => "Town",
+            CityStage::KotaDagang => "Trade City",
             CityStage::Metropolis => "Metropolis",
         }
     }
@@ -135,8 +135,8 @@ impl ProjectId {
 pub const WELL: ProjectDef = ProjectDef {
     id: ProjectId::Well,
     key: "well",
-    name: "Sumur",
-    description: "Bonus +10% yield Farming & Gathering. Prasyarat Balai Kampung.",
+    name: "Well",
+    description: "+10% Farming & Gathering yield. Prerequisite for Village Hall.",
     min_stage: CityStage::Kampung,
     max_level: 1,
     cost_bac_cents: 5_000,
@@ -147,8 +147,8 @@ pub const WELL: ProjectDef = ProjectDef {
 pub const GRANARY: ProjectDef = ProjectDef {
     id: ProjectId::Granary,
     key: "granary",
-    name: "Lumbung",
-    description: "Menambah +4 slot tas & +3% yield semua aktivitas per level (maks Lv 5).",
+    name: "Granary",
+    description: "+4 bag slots & +3% all activity yield per level (max Lv 5).",
     min_stage: CityStage::Kampung,
     max_level: MAX_GRANARY_LEVEL,
     cost_bac_cents: 8_000,
@@ -159,8 +159,8 @@ pub const GRANARY: ProjectDef = ProjectDef {
 pub const TOWN_HALL: ProjectDef = ProjectDef {
     id: ProjectId::TownHall,
     key: "town_hall",
-    name: "Balai Kampung",
-    description: "Naikkan kota ke Desa (buka Fishing, 3 Slot Aktivitas, cap Lv 20; butuh Sumur & Lumbung).",
+    name: "Village Hall",
+    description: "Advances city to Village (unlocks Fishing, 3 Activity Slots, Lv 20 cap; needs Well & Granary).",
     min_stage: CityStage::Kampung,
     max_level: 1,
     cost_bac_cents: 15_000,
@@ -171,8 +171,8 @@ pub const TOWN_HALL: ProjectDef = ProjectDef {
 pub const MARKET_HALL: ProjectDef = ProjectDef {
     id: ProjectId::MarketHall,
     key: "market_hall",
-    name: "Pasar Desa",
-    description: "Bonus +5% harga jual ke NPC. Prasyarat Balai Kota Kecil.",
+    name: "Market Hall",
+    description: "+5% direct NPC sell price. Prerequisite for Town Hall.",
     min_stage: CityStage::Desa,
     max_level: 1,
     cost_bac_cents: 20_000,
@@ -183,8 +183,8 @@ pub const MARKET_HALL: ProjectDef = ProjectDef {
 pub const CITY_HALL: ProjectDef = ProjectDef {
     id: ProjectId::CityHall,
     key: "city_hall",
-    name: "Balai Kota Kecil",
-    description: "Naikkan kota ke Kota Kecil (buka Mining, 4 Slot Aktivitas, cap Lv 30; butuh Pasar Desa).",
+    name: "Town Hall",
+    description: "Advances city to Town (unlocks Mining, 4 Activity Slots, Lv 30 cap; needs Market Hall).",
     min_stage: CityStage::Desa,
     max_level: 1,
     cost_bac_cents: 35_000,
@@ -195,8 +195,8 @@ pub const CITY_HALL: ProjectDef = ProjectDef {
 pub const TRADE_PORT: ProjectDef = ProjectDef {
     id: ProjectId::TradePort,
     key: "trade_port",
-    name: "Pelabuhan Dagang",
-    description: "Naikkan kota ke Kota Dagang (cap Lv 40, 3 Slot Craft, +15% hadiah Pesanan NPC).",
+    name: "Trade Port",
+    description: "Advances city to Trade City (Lv 40 cap, 3 Craft Slots, +15% NPC Order rewards).",
     min_stage: CityStage::KotaKecil,
     max_level: 1,
     cost_bac_cents: 60_000,
@@ -207,8 +207,8 @@ pub const TRADE_PORT: ProjectDef = ProjectDef {
 pub const METROPOLIS_TOWER: ProjectDef = ProjectDef {
     id: ProjectId::MetropolisTower,
     key: "metropolis_tower",
-    name: "Menara Metropolis",
-    description: "Naikkan kota ke Metropolis (cap Lv 50, +15% kecepatan Aktivitas & Craft).",
+    name: "Metropolis Tower",
+    description: "Advances city to Metropolis (Lv 50 cap, +15% Activity & Craft speed).",
     min_stage: CityStage::KotaDagang,
     max_level: 1,
     cost_bac_cents: 120_000,

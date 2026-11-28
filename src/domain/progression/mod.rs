@@ -63,25 +63,25 @@ pub const PROGRESSION_REWARDS: &[ProgressionReward] = &[
         key: "player_lv_5",
         min_player_level: 5,
         bac_cents: 10_000,
-        title: "Warga Teladan (Lv 5)",
+        title: "Model Citizen (Lv 5)",
     },
     ProgressionReward {
         key: "player_lv_10",
         min_player_level: 10,
         bac_cents: 25_000,
-        title: "Penggerak Kota (Lv 10)",
+        title: "Town Mover (Lv 10)",
     },
     ProgressionReward {
         key: "player_lv_15",
         min_player_level: 15,
         bac_cents: 40_000,
-        title: "Tokoh Niaga (Lv 15)",
+        title: "Trade Notable (Lv 15)",
     },
     ProgressionReward {
         key: "player_lv_25",
         min_player_level: 25,
         bac_cents: 80_000,
-        title: "Arsitek Metropolis (Lv 25)",
+        title: "Metropolis Architect (Lv 25)",
     },
 ];
 

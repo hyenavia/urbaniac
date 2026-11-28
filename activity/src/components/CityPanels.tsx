@@ -56,10 +56,10 @@ export function CityPanels({
 
   const title =
     tab === "city"
-      ? "Profil & Ekonomi Kota"
+      ? "City Profile & Economy"
       : tab === "inventory"
         ? "Inventory & Pending Claim"
-        : "Aktivitas & Proyek Kota";
+        : "Activities & City Projects";
 
   const readyRuns =
     activities?.runs.filter((r) => r.status === "ready").length ?? 0;
@@ -71,7 +71,7 @@ export function CityPanels({
       <div className="panel-header">
         <h2>{title}</h2>
         <button type="button" className="btn-ghost" onClick={onClose}>
-          Peta
+          Close
         </button>
       </div>
 
@@ -79,9 +79,9 @@ export function CityPanels({
         {tab === "city" && city && me.profile && (
           <>
             <div className="card">
-              <h3>Profil Pemain</h3>
+              <h3>Player Profile</h3>
               <div className="kv-row">
-                <span>Nama</span>
+                <span>Name</span>
                 <strong>{me.username}</strong>
               </div>
               <div className="kv-row">
@@ -91,49 +91,45 @@ export function CityPanels({
                 </span>
               </div>
               <div className="kv-row">
-                <span>Wallet Pribadi</span>
+                <span>Personal Wallet</span>
                 <strong className="mono">{me.profile.balance} Bac</strong>
-              </div>
-              <div className="kv-row">
-                <span>Bahasa</span>
-                <span>{me.profile.lang === "id" ? "Indonesia" : "English"}</span>
               </div>
             </div>
 
             <div className="card">
-              <h3>Ekonomi Kota ({city.stage_name})</h3>
+              <h3>City Economy ({city.stage_name})</h3>
               <div className="kv-row">
                 <span>City Treasury</span>
                 <strong className="mono">{city.treasury} Bac</strong>
               </div>
               <div className="kv-row">
-                <span>Tarif Pajak</span>
+                <span>Tax Rate</span>
                 <span className="mono">{city.tax_rate_pct}%</span>
               </div>
               <div className="kv-row">
-                <span>Estimasi Pajak / Biaya</span>
+                <span>Est. Tax / Upkeep</span>
                 <span className="mono">
                   +{city.est_tax_income} / -{city.est_expense}
                 </span>
               </div>
               <div className="kv-row">
-                <span>Welfare & Efektivitas</span>
+                <span>Welfare & Effectiveness</span>
                 <span className="mono">
                   {city.welfare}% / {city.effectiveness_pct}%
                 </span>
               </div>
               <div className="kv-row">
-                <span>Bonus Yield Kota</span>
+                <span>City Yield Bonus</span>
                 <span className="mono ok-text">+{city.yield_bonus_pct}%</span>
               </div>
               <div className="kv-row">
-                <span>Kru Bertugas</span>
+                <span>Assigned Crew</span>
                 <span className="mono">{city.assigned_crews}</span>
               </div>
             </div>
 
             <div className="card">
-              <h3>Atur Tarif Pajak</h3>
+              <h3>Set Tax Rate</h3>
               <div className="tax-grid">
                 {TAX_OPTIONS.map((pct) => (
                   <button
@@ -150,7 +146,7 @@ export function CityPanels({
             </div>
 
             <div className="card">
-              <h3>Kelola City Treasury</h3>
+              <h3>Manage City Treasury</h3>
               <div className="action-row">
                 <input
                   type="number"
@@ -160,7 +156,7 @@ export function CityPanels({
                   style={{ flex: 1 }}
                   value={treasuryAmount}
                   onChange={(e) => setTreasuryAmount(e.target.value)}
-                  placeholder="Jumlah Bac"
+                  placeholder="Bac amount"
                 />
               </div>
               <div className="action-row">
@@ -172,7 +168,7 @@ export function CityPanels({
                     onDepositTreasury(treasuryAmount, newRequestId())
                   }
                 >
-                  Setor ke Treasury
+                  Deposit to Treasury
                 </button>
                 <button
                   type="button"
@@ -182,15 +178,15 @@ export function CityPanels({
                     onWithdrawTreasury(treasuryAmount, newRequestId())
                   }
                 >
-                  Tarik ke Wallet
+                  Withdraw to Wallet
                 </button>
               </div>
             </div>
 
             <div className="card">
-              <h3>Fasilitas Terbangun ({city.facilities.length})</h3>
+              <h3>Built Facilities ({city.facilities.length})</h3>
               {city.facilities.length === 0 ? (
-                <p className="muted">Belum ada fasilitas terbangun.</p>
+                <p className="muted">No facilities built yet.</p>
               ) : (
                 city.facilities.map((f) => (
                   <div className="list-item" key={f.id}>
@@ -207,7 +203,7 @@ export function CityPanels({
           <>
             <div className="card">
               <div className="kv-row">
-                <span>Kapasitas Slot</span>
+                <span>Slot Capacity</span>
                 <strong className="mono">
                   {inventory.slots_used} / {inventory.slot_capacity}
                 </strong>
@@ -224,12 +220,12 @@ export function CityPanels({
                     disabled={busy}
                     onClick={onClaimPending}
                   >
-                    Klaim Pending
+                    Claim Pending
                   </button>
                 )}
               </div>
               {inventory.pending.length === 0 ? (
-                <p className="muted">Tidak ada item menunggu klaim.</p>
+                <p className="muted">No items waiting to be claimed.</p>
               ) : (
                 inventory.pending.map((p) => (
                   <div className="list-item" key={p.item_id}>
@@ -244,9 +240,9 @@ export function CityPanels({
             </div>
 
             <div className="card">
-              <h3>Item Inventory</h3>
+              <h3>Inventory Items</h3>
               {inventory.items.length === 0 ? (
-                <p className="muted">Belum ada item di inventory.</p>
+                <p className="muted">No items in inventory yet.</p>
               ) : (
                 inventory.items.map((it) => (
                   <div
@@ -276,7 +272,7 @@ export function CityPanels({
                           })
                         }
                       >
-                        Jual 1
+                        Sell 1
                       </button>
                       <button
                         type="button"
@@ -290,7 +286,7 @@ export function CityPanels({
                           })
                         }
                       >
-                        Jual Semua
+                        Sell All
                       </button>
                     </div>
                   </div>
@@ -305,7 +301,7 @@ export function CityPanels({
             <div className="card">
               <div className="kv-row">
                 <h3>
-                  Slot Aktivitas ({activities.runs.length} /{" "}
+                  Activity Slots ({activities.runs.length} /{" "}
                   {activities.slots_total})
                 </h3>
                 {readyRuns > 0 && (
@@ -315,18 +311,18 @@ export function CityPanels({
                     disabled={busy}
                     onClick={onCollectActivities}
                   >
-                    Ambil Semua ({readyRuns})
+                    Collect All ({readyRuns})
                   </button>
                 )}
               </div>
               {activities.runs.length === 0 ? (
-                <p className="muted">Semua slot aktivitas sedang kosong.</p>
+                <p className="muted">All activity slots are currently idle.</p>
               ) : (
                 activities.runs.map((r) => (
                   <div className="list-item" key={r.id}>
                     <span>{r.name}</span>
                     {r.status === "ready" ? (
-                      <span className="pill pill-gold">SIAP</span>
+                      <span className="pill pill-gold">READY</span>
                     ) : (
                       <span className="mono warn-text">
                         {formatCountdown(r.ends_at, nowMs, clockOffsetMs)}
@@ -338,15 +334,15 @@ export function CityPanels({
             </div>
 
             <div className="card">
-              <h3>Mulai Aktivitas</h3>
+              <h3>Start Activity</h3>
               {activities.catalog.map((cat) => (
                 <div className="list-item" key={cat.kind}>
                   <div>
                     <strong>{cat.name}</strong>
                     <div className="muted">
                       {cat.unlocked
-                        ? `${cat.base_duration_secs}d • +${cat.xp_reward} XP`
-                        : `Butuh ${cat.min_stage_name}`}
+                        ? `${cat.base_duration_secs}s • +${cat.xp_reward} XP`
+                        : `Requires ${cat.min_stage_name}`}
                     </div>
                   </div>
                   <button
@@ -355,14 +351,14 @@ export function CityPanels({
                     disabled={!cat.unlocked || !hasFreeSlot || busy}
                     onClick={() => onStartActivity(cat.kind)}
                   >
-                    Mulai
+                    Start
                   </button>
                 </div>
               ))}
             </div>
 
             <div className="card">
-              <h3>Progres Level Aktivitas</h3>
+              <h3>Activity Level Progress</h3>
               {activities.progress.map((p) => (
                 <div className="list-item" key={p.kind}>
                   <div>
@@ -380,7 +376,7 @@ export function CityPanels({
             </div>
 
             <div className="card">
-              <h3>Daftar Proyek Kota</h3>
+              <h3>City Projects</h3>
               {(quotes ?? []).map((q) => (
                 <div className="list-item" key={q.project}>
                   <div>
@@ -388,7 +384,7 @@ export function CityPanels({
                     <div className="muted">
                       Lv {q.current_level}/{q.max_level} •{" "}
                       {q.next_level === null
-                        ? "Maksimal"
+                        ? "Maxed"
                         : `${q.cost_bac} Bac`}
                     </div>
                   </div>
@@ -400,8 +396,8 @@ export function CityPanels({
                     {q.next_level === null
                       ? "MAX"
                       : q.can_start
-                        ? "Bangun"
-                        : "Detail"}
+                        ? "Build"
+                        : "Details"}
                   </button>
                 </div>
               ))}

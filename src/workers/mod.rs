@@ -1,10 +1,11 @@
 //! Scheduler tunggal + worker ber-batas. Tidak ada timer per aktivitas dan tidak ada polling rapat:
 //! scheduler tidur sampai job berikutnya jatuh tempo (atau dibangunkan lewat Notify).
-use crate::application::{activities, city, crafting, market};
+use crate::application::voice_boost::VoiceBoostTracker;
+use crate::application::{activities, city, crafting, giveaway, market};
 use crate::infrastructure::scheduler::{self, DueJob};
 use crate::web::events::{EventHub, RealtimeEvent};
 use chrono::Utc;
-use serenity::all::{Http, UserId};
+use serenity::all::{CreateMessage, Http, UserId};
 use sqlx::PgPool;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -20,11 +21,15 @@ async fn send_notifications(http_slot: &OnceLock<Arc<Http>>, notes: Vec<(i64, St
     let Some(http) = http_slot.get() else {
         return;
     };
+    let components = crate::bot::components::dm_activity_button();
     for (player_id, msg) in notes {
         let user = UserId::new(player_id as u64);
         match user.create_dm_channel(http).await {
             Ok(dm) => {
-                if let Err(e) = dm.say(http, msg).await {
+                let dm_msg = CreateMessage::new()
+                    .content(msg)
+                    .components(components.clone());
+                if let Err(e) = dm.send_message(http, dm_msg).await {
                     tracing::debug!(player_id, error = ?e, "gagal kirim DM notifikasi");
                 }
             }
@@ -41,14 +46,16 @@ async fn run_job(
     duration_pct: i64,
     http_slot: &OnceLock<Arc<Http>>,
     events: Option<&EventHub>,
+    voice_boost: Option<&VoiceBoostTracker>,
 ) -> anyhow::Result<()> {
     let mut tx = pool.begin().await?;
     if !scheduler::lock_pending(&mut *tx, job.id).await? {
         return Ok(());
     }
+    let mut giveaway_result = None;
     let notes = match job.kind.as_str() {
         activities::JOB_ACTIVITY_COMPLETE => {
-            activities::complete_run(&mut *tx, job.ref_id, duration_pct)
+            activities::complete_run_with_voice_boost(&mut *tx, job.ref_id, duration_pct, voice_boost)
                 .await?
                 .into_iter()
                 .collect()
@@ -63,7 +70,7 @@ async fn run_job(
             city::handle_city_economy_tick_job(&mut *tx, job.ref_id, duration_pct).await?
         }
         crafting::JOB_CRAFT_COMPLETE => {
-            crafting::complete_craft(&mut *tx, job.ref_id)
+            crafting::complete_craft_with_voice_boost(&mut *tx, job.ref_id, voice_boost)
                 .await?
                 .into_iter()
                 .collect()
@@ -77,11 +84,32 @@ async fn run_job(
         market::JOB_MARKET_TICK => {
             market::handle_market_tick_job(&mut *tx, job.ref_id, duration_pct).await?
         }
-        "giveaway_end" => Vec::new(),
+        giveaway::JOB_GIVEAWAY_END => {
+            giveaway_result = giveaway::finalize_giveaway_conn(&mut *tx, job.ref_id).await?;
+            Vec::new()
+        }
         other => anyhow::bail!("jenis job tidak dikenal: {other}"),
     };
     scheduler::mark_done(&mut *tx, job.id).await?;
     tx.commit().await?;
+
+    if let Some(res) = &giveaway_result {
+        if let Some(hub) = events {
+            for &pid in &res.credited_winners {
+                hub.publish(RealtimeEvent {
+                    player_id: Some(pid),
+                    kind: "giveaway_won",
+                    message: Some(format!(
+                        "You won {} (Giveaway #{})!",
+                        res.giveaway.prize, res.giveaway.id
+                    )),
+                });
+            }
+        }
+        if let Some(http) = http_slot.get() {
+            crate::bot::giveaway_ui::publish_giveaway_result(http, res).await;
+        }
+    }
 
     if let Some(hub) = events {
         let ev_kind = match job.kind.as_str() {
@@ -137,8 +165,9 @@ async fn process_job(
     duration_pct: i64,
     http_slot: &OnceLock<Arc<Http>>,
     events: Option<&EventHub>,
+    voice_boost: Option<&VoiceBoostTracker>,
 ) {
-    if let Err(e) = run_job(pool, job, duration_pct, http_slot, events).await {
+    if let Err(e) = run_job(pool, job, duration_pct, http_slot, events, voice_boost).await {
         tracing::error!(job_id = job.id, error = ?e, "job gagal");
         if let Ok(mut conn) = pool.acquire().await {
             let _ = scheduler::record_failure(&mut *conn, job.id, &format!("{e:#}")).await;
@@ -158,7 +187,7 @@ pub async fn process_due_batch_with_pct(
     duration_pct: i64,
     http_slot: &Arc<OnceLock<Arc<Http>>>,
 ) -> anyhow::Result<usize> {
-    process_due_batch_internal(pool, duration_pct, http_slot, None).await
+    process_due_batch_internal(pool, duration_pct, http_slot, None, None).await
 }
 
 async fn process_due_batch_internal(
@@ -166,6 +195,7 @@ async fn process_due_batch_internal(
     duration_pct: i64,
     http_slot: &Arc<OnceLock<Arc<Http>>>,
     events: Option<&Arc<EventHub>>,
+    voice_boost: Option<&Arc<VoiceBoostTracker>>,
 ) -> anyhow::Result<usize> {
     let jobs = {
         let mut conn = pool.acquire().await?;
@@ -179,8 +209,9 @@ async fn process_due_batch_internal(
             let job = job.clone();
             let http = http_slot.clone();
             let ev = events.cloned();
+            let vb = voice_boost.cloned();
             set.spawn(async move {
-                process_job(&pool, &job, duration_pct, &http, ev.as_deref()).await
+                process_job(&pool, &job, duration_pct, &http, ev.as_deref(), vb.as_deref()).await
             });
         }
         while let Some(res) = set.join_next().await {
@@ -198,7 +229,7 @@ pub async fn run_scheduler(
     duration_pct: i64,
     http_slot: Arc<OnceLock<Arc<Http>>>,
 ) {
-    run_scheduler_with_events(pool, notify, duration_pct, http_slot, None).await;
+    run_scheduler_with_events(pool, notify, duration_pct, http_slot, None, None).await;
 }
 
 pub async fn run_scheduler_with_events(
@@ -207,6 +238,7 @@ pub async fn run_scheduler_with_events(
     duration_pct: i64,
     http_slot: Arc<OnceLock<Arc<Http>>>,
     events: Option<Arc<EventHub>>,
+    voice_boost: Option<Arc<VoiceBoostTracker>>,
 ) {
     tracing::info!("scheduler berjalan");
     if let Err(e) = market::ensure_market_tick_scheduled(&pool, duration_pct).await {
@@ -216,7 +248,15 @@ pub async fn run_scheduler_with_events(
         tracing::error!(error = ?e, "gagal menjadwalkan city_economy_tick awal");
     }
     loop {
-        match process_due_batch_internal(&pool, duration_pct, &http_slot, events.as_ref()).await {
+        match process_due_batch_internal(
+            &pool,
+            duration_pct,
+            &http_slot,
+            events.as_ref(),
+            voice_boost.as_ref(),
+        )
+        .await
+        {
             Ok(n) if n > 0 => continue, // mungkin masih ada yang jatuh tempo
             Ok(_) => {}
             Err(e) => {

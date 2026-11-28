@@ -43,7 +43,7 @@ pub struct RecipeDef {
 pub const RECIPES: &[RecipeDef] = &[
     RecipeDef {
         id: "flour",
-        name: "Tepung Gandum",
+        name: "Wheat Flour",
         tier: RecipeTier::Processed,
         output_item_id: "flour",
         output_qty: 1,
@@ -52,7 +52,7 @@ pub const RECIPES: &[RecipeDef] = &[
     },
     RecipeDef {
         id: "plank",
-        name: "Papan Kayu",
+        name: "Wood Plank",
         tier: RecipeTier::Processed,
         output_item_id: "plank",
         output_qty: 1,
@@ -61,7 +61,7 @@ pub const RECIPES: &[RecipeDef] = &[
     },
     RecipeDef {
         id: "herb_extract",
-        name: "Ekstrak Herba",
+        name: "Herb Extract",
         tier: RecipeTier::Processed,
         output_item_id: "herb_extract",
         output_qty: 1,
@@ -70,7 +70,7 @@ pub const RECIPES: &[RecipeDef] = &[
     },
     RecipeDef {
         id: "bread",
-        name: "Roti Kampung",
+        name: "Village Bread",
         tier: RecipeTier::Finished,
         output_item_id: "bread",
         output_qty: 1,
@@ -79,7 +79,7 @@ pub const RECIPES: &[RecipeDef] = &[
     },
     RecipeDef {
         id: "wooden_crate",
-        name: "Peti Kayu",
+        name: "Wooden Crate",
         tier: RecipeTier::Finished,
         output_item_id: "wooden_crate",
         output_qty: 1,
@@ -88,7 +88,7 @@ pub const RECIPES: &[RecipeDef] = &[
     },
     RecipeDef {
         id: "healing_tonic",
-        name: "Tonik Herba",
+        name: "Herbal Tonic",
         tier: RecipeTier::Finished,
         output_item_id: "healing_tonic",
         output_qty: 1,

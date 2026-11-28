@@ -21,21 +21,21 @@ pub const JOB_MARKET_TICK: &str = "market_tick";
 
 #[derive(Debug, thiserror::Error)]
 pub enum MarketError {
-    #[error("profil belum ada, jalankan /start")]
+    #[error("No profile yet, run /start")]
     NotRegistered,
-    #[error("item tidak dikenal")]
+    #[error("Unknown item")]
     UnknownItem,
-    #[error("jumlah tidak valid")]
+    #[error("Invalid quantity")]
     InvalidQty,
-    #[error("harga target harus lebih dari 0")]
+    #[error("Target price must be greater than 0")]
     InvalidPrice,
-    #[error("maksimal {0} listing broker aktif")]
+    #[error("Maximum {0} active broker listings allowed")]
     TooManyListings(i64),
-    #[error("jumlah item tidak cukup (kamu punya {have})")]
+    #[error("Not enough items (you have {have})")]
     InsufficientItem { have: i64 },
-    #[error("saldo Bac tidak cukup untuk fee listing (butuh {need}, saldo {have})")]
+    #[error("Insufficient Bac balance for listing fee (need {need}, have {have})")]
     InsufficientBacForFee { need: Decimal, have: Decimal },
-    #[error("listing tidak ditemukan atau sudah selesai")]
+    #[error("Listing not found or already closed")]
     ListingNotFound,
     #[error(transparent)]
     Wallet(#[from] WalletError),
@@ -273,40 +273,22 @@ pub async fn expire_listing(
     if listing.status != "active" {
         return Ok(None);
     }
-    let lang = player_repo::get_lang(conn, listing.player_id)
-        .await
-        .unwrap_or(Lang::En);
-    let mut note = match lang {
-        Lang::En => format!("📦 Broker Listing #{} expired.", listing.id),
-        Lang::Id => format!("📦 Listing Makelar #{} kedaluwarsa.", listing.id),
-    };
+    let mut note = format!("📦 Broker Listing #{} expired.", listing.id);
     if let Some(item) = find_item(&listing.item_id) {
         let cap = inventory::slot_capacity_conn(conn, listing.player_id).await?;
         let p = inventory_repo::add_item(conn, listing.player_id, item, listing.quantity, cap)
             .await?;
-        let it_name = item_name(item.id, lang);
+        let it_name = item_name(item.id, Lang::En);
         note = if p.pending > 0 {
-            match lang {
-                Lang::En => format!(
-                    "📦 Broker Listing **{} × {}** expired. ⚠️ Inventory full — moved to **Pending Claim**!",
-                    it_name, listing.quantity
-                ),
-                Lang::Id => format!(
-                    "📦 Listing Makelar **{} × {}** kedaluwarsa. ⚠️ Inventory penuh — masuk **Pending Claim**!",
-                    it_name, listing.quantity
-                ),
-            }
+            format!(
+                "📦 Broker Listing **{} × {}** expired. ⚠️ Inventory full — moved to **Pending Claim**!",
+                it_name, listing.quantity
+            )
         } else {
-            match lang {
-                Lang::En => format!(
-                    "📦 Broker Listing **{} × {}** expired and was returned to your inventory.",
-                    it_name, listing.quantity
-                ),
-                Lang::Id => format!(
-                    "📦 Listing Makelar **{} × {}** kedaluwarsa dan dikembalikan ke inventory.",
-                    it_name, listing.quantity
-                ),
-            }
+            format!(
+                "📦 Broker Listing **{} × {}** expired and was returned to your inventory.",
+                it_name, listing.quantity
+            )
         };
     }
     market_repo::mark_closed(conn, listing_id, "expired").await?;
@@ -395,26 +377,15 @@ async fn run_market_tick_with_notes(
         let key = format!("broker_sale:{}", locked.id);
         let _ = wallet_repo::apply(conn, locked.player_id, net, &reason, &key).await?;
         market_repo::mark_sold(conn, locked.id, mkt_price, commission).await?;
-        let lang = player_repo::get_lang(conn, locked.player_id)
-            .await
-            .unwrap_or(Lang::En);
         let item_label = find_item(&locked.item_id)
-            .map(|i| item_name(i.id, lang))
+            .map(|i| item_name(i.id, Lang::En))
             .unwrap_or(&locked.item_id);
-        let msg = match lang {
-            Lang::En => format!(
-                "💰 Broker Listing **{} × {}** sold! Net **{}** credited to your Wallet.",
-                item_label,
-                locked.quantity,
-                format_bac(net)
-            ),
-            Lang::Id => format!(
-                "💰 Listing Makelar **{} × {}** terjual! Bersih **{}** masuk ke Wallet.",
-                item_label,
-                locked.quantity,
-                format_bac(net)
-            ),
-        };
+        let msg = format!(
+            "💰 Broker Listing **{} × {}** sold! Net **{}** credited to your Wallet.",
+            item_label,
+            locked.quantity,
+            format_bac(net)
+        );
         notes.push((locked.player_id, msg));
     }
 

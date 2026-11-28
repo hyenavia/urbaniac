@@ -14,17 +14,17 @@ use sqlx::{PgConnection, PgPool};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CrewError {
-    #[error("profil belum ada, jalankan /start")]
+    #[error("No profile yet, run /start")]
     NotRegistered,
-    #[error("slot kru sudah penuh (maksimal {0} kru)")]
+    #[error("Crew roster is full (max {0} crew)")]
     CrewFull(i64),
-    #[error("kru tidak ditemukan")]
+    #[error("Crew member not found")]
     NotFound,
-    #[error("kru sudah di level maksimal ({0})")]
+    #[error("Crew member is already at maximum level ({0})")]
     MaxLevel(i32),
-    #[error("aktivitas ini terbuka di stage {}", .0.name())]
+    #[error("This activity unlocks at city stage {}", .0.name())]
     ActivityLocked(CityStage),
-    #[error("saldo Bac tidak cukup (butuh {need}, saldo {have})")]
+    #[error("Insufficient Bac balance (need {need}, have {have})")]
     InsufficientBac { need: Decimal, have: Decimal },
     #[error(transparent)]
     Wallet(#[from] WalletError),

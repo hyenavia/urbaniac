@@ -9,6 +9,7 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use tokio::sync::Notify;
 use tower::ServiceExt;
+use urbaniac::application::voice_boost::VoiceBoostTracker;
 use urbaniac::application::{economy, player};
 use urbaniac::domain::resources::find_item;
 use urbaniac::infrastructure::repositories::inventory_repo;
@@ -57,6 +58,7 @@ fn router_for(pool: PgPool) -> axum::Router {
         rate_limiter: Arc::new(RateLimiter::default()),
         events: Arc::new(EventHub::default()),
         client_id: "test-client-id".to_string(),
+        voice_boost: Arc::new(VoiceBoostTracker::disabled()),
     });
     build_router(state, None)
 }
@@ -347,8 +349,8 @@ async fn web_api_phase2_to_9_endpoints(pool: PgPool) {
         tx.commit().await.unwrap();
     }
 
-    // 1. Bahasa toggle/set
-    let (status, lang_id) = post_json(
+    // 1. Language endpoint always returns English
+    let (status, lang_resp) = post_json(
         &app,
         "/api/player/lang",
         Some("token-alice"),
@@ -356,7 +358,7 @@ async fn web_api_phase2_to_9_endpoints(pool: PgPool) {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(lang_id["lang"], "id");
+    assert_eq!(lang_resp["lang"], "en");
 
     // 2. Market & Broker listing
     let (status, mkt) = get_json(&app, "/api/market", Some("token-alice")).await;

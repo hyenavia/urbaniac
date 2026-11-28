@@ -52,10 +52,10 @@ pub fn xp_progress_bar(xp: i64, needed: i64) -> String {
     format!("`{bar}`\n{xp} / {needed} XP ({:.1}%)", ratio * 100.0)
 }
 
-pub fn help(lang: Lang) -> CreateEmbed {
-    let (title, desc) = match lang {
-        Lang::En => (
-            "📖 Urbaniac Gameplay Guide",
+pub fn help(_lang: Lang) -> CreateEmbed {
+    branding::styled_embed(branding::COLOR_EXPLORATION)
+        .title("📖 Urbaniac Gameplay Guide")
+        .description(
             "Follow this progression path from **Hamlet** to **Metropolis**:\n\n\
              **1️⃣ Gather Resources (Activities)**\n\
              Open **Activities** -> start **Farming** / **Gathering** (2 slots). When done, you'll get a **DM alert** -> press **Collect Rewards**.\n\n\
@@ -67,25 +67,7 @@ pub fn help(lang: Lang) -> CreateEmbed {
              Open **Crafting & Orders** -> process raw materials (`Wheat Flour`, `Wood Plank`, `Village Bread`) -> fulfill **NPC Orders** for bonus Bac & Shop Reputation.\n\n\
              **5️⃣ Automate with Crew**\n\
              Open **Crew** -> hire crew (100 Bac) -> assign them to activities in **AUTO** mode so they run continuously.",
-        ),
-        Lang::Id => (
-            "📖 Panduan Bermain Urbaniac",
-            "Ikuti alur bermain berikut dari **Kampung** hingga **Metropolis**:\n\n\
-             **1️⃣ Kumpulkan Resource (Aktivitas)**\n\
-             Buka **Aktivitas** -> mulai **Farming** / **Gathering** (2 slot). Saat selesai, kamu akan mendapat **notifikasi DM** -> tekan **Ambil Reward**.\n\n\
-             **2️⃣ Dapatkan Bac (Jual NPC / Pasar & Makelar)**\n\
-             Buka **Jual NPC** untuk langsung menukar item menjadi **Bac** (bisa jual 1, 10, Semua, atau Custom), atau titip di **Pasar & Makelar** untuk target harga lebih tinggi.\n\n\
-             **3️⃣ Bangun & Naikkan Stage Kota**\n\
-             Buka **Kota** -> bangun **Sumur** & **Lumbung** (+4 slot tas/level) -> bangun **Balai Kampung** untuk naik ke **Desa** (membuka **Fishing** & menaikkan cap level ke Lv 20).\n\n\
-             **4️⃣ Olah Item & Pesanan (Workshop)**\n\
-             Buka **Crafting & Pesanan** -> olah bahan mentah (`Tepung`, `Papan`, `Roti`) -> penuhi **Pesanan NPC** untuk Bac ekstra & Reputasi Toko.\n\n\
-             **5️⃣ Otomasi dengan Kru**\n\
-             Buka **Kru** -> rekrut kru (100 Bac) -> tugaskan ke aktivitas dengan mode **AUTO** agar berjalan otomatis.",
-        ),
-    };
-    branding::styled_embed(branding::COLOR_EXPLORATION)
-        .title(title)
-        .description(desc)
+        )
 }
 
 pub fn host_panel() -> CreateEmbed {
@@ -93,70 +75,52 @@ pub fn host_panel() -> CreateEmbed {
         .title("🎮  Play Urbaniac")
         .description(
             "Urbaniac is an RPG economy & city-building game played directly inside Discord.\n\n\
-             ▶️  Click **Play** below to open your personal **Private Thread**.\n\
+             ▶️  Click **Play** to open your personal **Private Thread**.\n\
+             🚀  Click **Launch** to open the **3D City Activity** directly.\n\
              💾  Your progress, **Bac**, city, and items are saved automatically.\n\
              🏗️  Grow your settlement from a **Hamlet** into a **Metropolis**.\n\
-             🔔  Completion alerts for activities, projects, and crafting are sent straight to your **DMs**.\n\
-             🌐  You can switch between **English** and **Bahasa Indonesia** anytime inside your thread.",
+             🔔  Completion alerts for activities, projects, and crafting are sent straight to your **DMs**.",
         )
         .image(branding::banner_url())
 }
 
 pub fn welcome(p: &ProfileView, created: bool, lang: Lang) -> CreateEmbed {
-    let title = match (created, lang) {
-        (true, Lang::En) => format!("🌱 Welcome, {}!", p.player.username),
-        (true, Lang::Id) => format!("🌱 Selamat Datang, {}!", p.player.username),
-        (false, _) => format!("👤 {}", p.player.username.to_uppercase()),
+    let title = if created {
+        format!("🌱 Welcome, {}!", p.player.username)
+    } else {
+        format!("👤 {}", p.player.username.to_uppercase())
     };
     profile(p, lang).title(title)
 }
 
-fn next_objective(stage: CityStage, facilities: &[(ProjectId, i32)], lang: Lang) -> &'static str {
+fn next_objective(stage: CityStage, facilities: &[(ProjectId, i32)], _lang: Lang) -> &'static str {
     let has = |id: ProjectId| facilities.iter().any(|(fid, lvl)| *fid == id && *lvl > 0);
     match stage {
         CityStage::Kampung => {
             if !has(ProjectId::Well) {
-                match lang {
-                    Lang::En => "Gather Wood & build **Well** in **City** (+10% Farming & Gathering yield).",
-                    Lang::Id => "Kumpulkan Kayu lalu bangun **Sumur** di menu **Kota** (+10% yield Farming & Gathering).",
-                }
+                "Gather Wood & build **Well** in **City** (+10% Farming & Gathering yield)."
             } else if !has(ProjectId::Granary) {
-                match lang {
-                    Lang::En => "Build **Granary** in **City** (+4 bag slots & +3% activity yield).",
-                    Lang::Id => "Bangun **Lumbung** di menu **Kota** (+4 slot tas & +3% yield aktivitas).",
-                }
+                "Build **Granary** in **City** (+4 bag slots & +3% activity yield)."
             } else {
-                match lang {
-                    Lang::En => "Build **Village Hall** to advance to **Village** (unlocks Fishing & 3rd Activity Slot).",
-                    Lang::Id => "Bangun **Balai Kampung** untuk naik ke **Desa** (buka Fishing & 3 Slot Aktivitas).",
-                }
+                "Build **Village Hall** to advance to **Village** (unlocks Fishing & 3rd Activity Slot)."
             }
         }
         CityStage::Desa => {
             if !has(ProjectId::MarketHall) {
-                match lang {
-                    Lang::En => "Craft Planks & Bread, then build **Market Hall** (+5% NPC sell price).",
-                    Lang::Id => "Craft Papan & Roti, lalu bangun **Pasar Desa** (+5% harga jual ke NPC).",
-                }
+                "Craft Planks & Bread, then build **Market Hall** (+5% NPC sell price)."
             } else {
-                match lang {
-                    Lang::En => "Build **Town Hall** to advance to **Town** (unlocks Mining & 4th Activity Slot).",
-                    Lang::Id => "Bangun **Balai Kota Kecil** untuk naik ke **Kota Kecil** (buka Mining & 4 Slot Aktivitas).",
-                }
+                "Build **Town Hall** to advance to **Town** (unlocks Mining & 4th Activity Slot)."
             }
         }
-        CityStage::KotaKecil => match lang {
-            Lang::En => "Mine Iron Ore & build **Trade Port** (3rd Craft Slot & +15% NPC Order rewards).",
-            Lang::Id => "Mining Bijih Besi & bangun **Pelabuhan Dagang** (3 Slot Craft & +15% hadiah Pesanan NPC).",
-        },
-        CityStage::KotaDagang => match lang {
-            Lang::En => "Gather Amethyst & Herbal Tonic, then build **Metropolis Tower** (+15% Activity & Craft speed).",
-            Lang::Id => "Kumpulkan Kecubung & Tonik Herba, lalu bangun **Menara Metropolis** (+15% kecepatan Aktivitas & Craft).",
-        },
-        CityStage::Metropolis => match lang {
-            Lang::En => "Max out Granary Lv 5, Crew levels, Activity levels (Lv 50), and Shop Reputation!",
-            Lang::Id => "Maksimalkan Lumbung Lv 5, level Kru, level Aktivitas (Lv 50), dan Reputasi Toko!",
-        },
+        CityStage::KotaKecil => {
+            "Mine Iron Ore & build **Trade Port** (3rd Craft Slot & +15% NPC Order rewards)."
+        }
+        CityStage::KotaDagang => {
+            "Gather Amethyst & Herbal Tonic, then build **Metropolis Tower** (+15% Activity & Craft speed)."
+        }
+        CityStage::Metropolis => {
+            "Max out Granary Lv 5, Crew levels, Activity levels (Lv 50), and Shop Reputation!"
+        }
     }
 }
 
@@ -165,26 +129,6 @@ pub fn profile(p: &ProfileView, lang: Lang) -> CreateEmbed {
     let needed = xp_to_next(pl.level);
     let s_name = stage_name(p.city_stage, lang);
     let s_era = stage_era(p.city_stage, lang);
-    let (res_label, prog_label, econ_label, inv_label, loc_label, slots_word, obj_label) = match lang {
-        Lang::En => (
-            "Resident",
-            "Character Progression",
-            "Economy",
-            "Inventory",
-            "Current Location",
-            "Slots",
-            "🎯 Next Objective",
-        ),
-        Lang::Id => (
-            "Warga",
-            "Progres Karakter",
-            "Ekonomi",
-            "Inventory",
-            "Lokasi Saat Ini",
-            "Slot",
-            "🎯 Tujuan Berikutnya",
-        ),
-    };
     let pending_note = if p.inventory.pending.is_empty() {
         String::new()
     } else {
@@ -192,23 +136,35 @@ pub fn profile(p: &ProfileView, lang: Lang) -> CreateEmbed {
     };
     let mut e = branding::styled_embed(branding::COLOR_GENERAL)
         .title(format!("👤 {}", pl.username.to_uppercase()))
-        .description(format!("**LV. {:02}** · {} {}", pl.level, s_name, res_label))
-        .field(prog_label, xp_progress_bar(pl.xp, needed), false)
-        .field(econ_label, format!("🪙 {}", format_bac(p.balance)), true)
+        .description(format!("**LV. {:02}** · {} Resident", pl.level, s_name))
+        .field("Character Progression", xp_progress_bar(pl.xp, needed), false)
+        .field("Economy", format!("🪙 {}", format_bac(p.balance)), true)
         .field(
-            inv_label,
+            "Inventory",
             format!(
-                "🎒 {}/{} {}{}",
-                p.inventory.slots_used, p.inventory.slot_capacity, slots_word, pending_note
+                "🎒 {}/{} Slots{}",
+                p.inventory.slots_used, p.inventory.slot_capacity, pending_note
             ),
             true,
         )
-        .field(loc_label, format!("🏘️ {} · {}", s_name, s_era), true)
-        .field(obj_label, next_objective(p.city_stage, &p.facilities, lang), false);
+        .field("Current Location", format!("🏘️ {} · {}", s_name, s_era), true)
+        .field("🎯 Next Objective", next_objective(p.city_stage, &p.facilities, lang), false);
     if let Some(url) = &pl.avatar_url {
         e = e.thumbnail(url);
     }
     e
+}
+
+pub fn with_voice_boost(embed: CreateEmbed, boosted: bool) -> CreateEmbed {
+    if boosted {
+        embed.field(
+            "🔊 Voice Boost",
+            "Active (+20% Activity & Craft Speed • +15% XP)",
+            false,
+        )
+    } else {
+        embed
+    }
 }
 
 fn fmt_lines(lines: &[InventoryLine], empty: &str, lang: Lang) -> String {
@@ -231,25 +187,11 @@ fn fmt_lines(lines: &[InventoryLine], empty: &str, lang: Lang) -> String {
 }
 
 pub fn inventory(v: &InventoryView, note: Option<String>, lang: Lang) -> CreateEmbed {
-    let (title, stored_hdr, empty_msg, pending_hdr) = match lang {
-        Lang::En => (
-            format!("🎒 Inventory — {}/{} Slots", v.slots_used, v.slot_capacity),
-            "Stored Items",
-            "Your bag is empty.",
-            "⏳ Pending Claim (Bag Full)",
-        ),
-        Lang::Id => (
-            format!("🎒 Inventory — {}/{} Slot", v.slots_used, v.slot_capacity),
-            "Item Tersimpan",
-            "Tas masih kosong.",
-            "⏳ Pending Claim (Tas Penuh)",
-        ),
-    };
     let mut e = branding::styled_embed(branding::COLOR_INVENTORY)
-        .title(title)
-        .field(stored_hdr, fmt_lines(&v.lines, empty_msg, lang), false);
+        .title(format!("🎒 Inventory — {}/{} Slots", v.slots_used, v.slot_capacity))
+        .field("Stored Items", fmt_lines(&v.lines, "Your bag is empty.", lang), false);
     if !v.pending.is_empty() {
-        e = e.field(pending_hdr, fmt_lines(&v.pending, "", lang), false);
+        e = e.field("⏳ Pending Claim (Bag Full)", fmt_lines(&v.pending, "", lang), false);
     }
     if let Some(n) = note {
         e = e.description(n);
@@ -268,22 +210,16 @@ pub fn activities(o: &ActivityOverview, note: Option<String>, lang: Lang) -> Cre
     for r in &o.runs {
         let a_name = activity_name(r.kind, lang);
         match r.status {
-            RunStatus::Running => lines.push(match lang {
-                Lang::En => format!("⏳ **{}** — finishes <t:{}:R>", a_name, r.ends_at.timestamp()),
-                Lang::Id => format!("⏳ **{}** — selesai <t:{}:R>", a_name, r.ends_at.timestamp()),
-            }),
-            RunStatus::Ready => lines.push(match lang {
-                Lang::En => format!("✅ **{}** — **Ready to Collect**", a_name),
-                Lang::Id => format!("✅ **{}** — **Siap Diambil**", a_name),
-            }),
+            RunStatus::Running => {
+                lines.push(format!("⏳ **{}** — finishes <t:{}:R>", a_name, r.ends_at.timestamp()));
+            }
+            RunStatus::Ready => {
+                lines.push(format!("✅ **{}** — **Ready to Collect**", a_name));
+            }
         }
     }
-    let empty_slot = match lang {
-        Lang::En => "▫ *(empty slot)*",
-        Lang::Id => "▫ *(slot kosong)*",
-    };
     for _ in (o.runs.len() as i64)..o.slots_total {
-        lines.push(empty_slot.to_string());
+        lines.push("▫ *(empty slot)*".to_string());
     }
     let progress = o
         .progress
@@ -306,22 +242,10 @@ pub fn activities(o: &ActivityOverview, note: Option<String>, lang: Lang) -> Cre
         })
         .collect::<Vec<_>>()
         .join("\n");
-    let (title, slots_hdr, levels_hdr) = match lang {
-        Lang::En => (
-            format!("⚡ Activity Board ({}/{} Slots)", o.runs.len(), o.slots_total),
-            "Activity Slots",
-            "Activity Levels",
-        ),
-        Lang::Id => (
-            format!("⚡ Activity Board ({}/{} Slot)", o.runs.len(), o.slots_total),
-            "Slot Aktivitas",
-            "Level Aktivitas",
-        ),
-    };
     let mut e = branding::styled_embed(branding::COLOR_ACTIVITIES)
-        .title(title)
-        .field(slots_hdr, lines.join("\n"), false)
-        .field(levels_hdr, progress, false);
+        .title(format!("⚡ Activity Board ({}/{} Slots)", o.runs.len(), o.slots_total))
+        .field("Activity Slots", lines.join("\n"), false)
+        .field("Activity Levels", progress, false);
     if let Some(n) = note {
         e = e.description(n);
     }
@@ -330,10 +254,7 @@ pub fn activities(o: &ActivityOverview, note: Option<String>, lang: Lang) -> Cre
 
 pub fn claim_note(sums: &[ClaimSummary], lang: Lang) -> String {
     if sums.is_empty() {
-        return match lang {
-            Lang::En => "No rewards are ready to collect yet.".to_string(),
-            Lang::Id => "Belum ada reward yang siap diambil.".to_string(),
-        };
+        return "No rewards are ready to collect yet.".to_string();
     }
     sums.iter()
         .map(|s| {
@@ -343,22 +264,13 @@ pub fn claim_note(sums: &[ClaimSummary], lang: Lang) -> String {
                 .map(|(it, stored, pending)| {
                     let name = item_name(it.id, lang);
                     if *pending > 0 {
-                        match lang {
-                            Lang::En => format!(
-                                "{} {} +{} ({} went to Pending Claim)",
-                                item_icon(it.id),
-                                name,
-                                stored,
-                                pending
-                            ),
-                            Lang::Id => format!(
-                                "{} {} +{} ({} masuk Pending Claim)",
-                                item_icon(it.id),
-                                name,
-                                stored,
-                                pending
-                            ),
-                        }
+                        format!(
+                            "{} {} +{} ({} went to Pending Claim)",
+                            item_icon(it.id),
+                            name,
+                            stored,
+                            pending
+                        )
                     } else {
                         format!("{} {} +{}", item_icon(it.id), name, stored)
                     }
@@ -366,10 +278,7 @@ pub fn claim_note(sums: &[ClaimSummary], lang: Lang) -> String {
                 .collect::<Vec<_>>()
                 .join(", ");
             let lvl = if s.new_level > s.old_level {
-                match lang {
-                    Lang::En => format!(" — leveled up to **LV. {:02}**!", s.new_level),
-                    Lang::Id => format!(" — naik ke **LV. {:02}**!", s.new_level),
-                }
+                format!(" — leveled up to **LV. {:02}**!", s.new_level)
             } else {
                 String::new()
             };
@@ -399,38 +308,20 @@ pub fn sell_prompt(
         })
         .collect::<Vec<_>>()
         .join("\n");
-    let title = match lang {
-        Lang::En => "🪙 Sell to NPC (Dynamic Market Prices)",
-        Lang::Id => "🪙 Jual ke NPC (Harga Pasar Dinamis)",
-    };
     branding::styled_embed(branding::COLOR_ECONOMY)
-        .title(title)
+        .title("🪙 Sell to NPC (Dynamic Market Prices)")
         .description(text)
 }
 
 pub fn sell_item(item: &ItemDef, owned: i64, unit_price: Decimal, lang: Lang) -> CreateEmbed {
     let name = item_name(item.id, lang);
-    let (title, desc) = match lang {
-        Lang::En => (
-            format!("{} Sell {}", item_icon(item.id), name),
-            format!(
-                "You own **{}**.\nCurrent NPC price: **{} / unit**.",
-                owned,
-                format_bac(unit_price)
-            ),
-        ),
-        Lang::Id => (
-            format!("{} Jual {}", item_icon(item.id), name),
-            format!(
-                "Kamu punya **{}**.\nHarga NPC saat ini: **{} / unit**.",
-                owned,
-                format_bac(unit_price)
-            ),
-        ),
-    };
     branding::styled_embed(branding::COLOR_ECONOMY)
-        .title(title)
-        .description(desc)
+        .title(format!("{} Sell {}", item_icon(item.id), name))
+        .description(format!(
+            "You own **{}**.\nCurrent NPC price: **{} / unit**.",
+            owned,
+            format_bac(unit_price)
+        ))
 }
 
 fn format_price_lines(prices: &[&MarketPriceView], base_word: &str, lang: Lang) -> String {
@@ -461,16 +352,12 @@ fn format_price_lines(prices: &[&MarketPriceView], base_word: &str, lang: Lang) 
 }
 
 fn split_market_price_fields(prices: &[MarketPriceView], lang: Lang) -> (String, String) {
-    let base_word = match lang {
-        Lang::En => "base",
-        Lang::Id => "dasar",
-    };
     let is_crafted = |id: &str| RECIPES.iter().any(|r| r.output_item_id == id);
     let raw: Vec<&MarketPriceView> = prices.iter().filter(|p| !is_crafted(p.item.id)).collect();
     let crafted: Vec<&MarketPriceView> = prices.iter().filter(|p| is_crafted(p.item.id)).collect();
     (
-        format_price_lines(&raw, base_word, lang),
-        format_price_lines(&crafted, base_word, lang),
+        format_price_lines(&raw, "base", lang),
+        format_price_lines(&crafted, "base", lang),
     )
 }
 
@@ -478,15 +365,12 @@ pub fn market(ov: &MarketOverview, note: Option<String>, lang: Lang) -> CreateEm
     let (raw_lines, crafted_lines) = split_market_price_fields(&ov.prices, lang);
 
     let listing_lines = if ov.listings.is_empty() {
-        match lang {
-            Lang::En => "No active listings yet.".to_string(),
-            Lang::Id => "Belum ada listing aktif.".to_string(),
-        }
+        "No active listings yet.".to_string()
     } else {
         ov.listings
             .iter()
-            .map(|l| match lang {
-                Lang::En => format!(
+            .map(|l| {
+                format!(
                     "#{} {} **{} × {}** — target {}/unit, fee {}, expires <t:{}:R>",
                     l.id,
                     item_icon(l.item.id),
@@ -495,83 +379,39 @@ pub fn market(ov: &MarketOverview, note: Option<String>, lang: Lang) -> CreateEm
                     format_bac(l.target_unit_price),
                     format_bac(l.listing_fee),
                     l.expires_at.timestamp()
-                ),
-                Lang::Id => format!(
-                    "#{} {} **{} × {}** — target {}/unit, fee {}, habis <t:{}:R>",
-                    l.id,
-                    item_icon(l.item.id),
-                    item_name(l.item.id, lang),
-                    l.quantity,
-                    format_bac(l.target_unit_price),
-                    format_bac(l.listing_fee),
-                    l.expires_at.timestamp()
-                ),
+                )
             })
             .collect::<Vec<_>>()
             .join("\n")
     };
 
-    let none_word = match lang {
-        Lang::En => "None",
-        Lang::Id => "Tidak ada",
-    };
     let trend_label = ov
         .calendar
         .trend_item_id
         .map(|id| item_name(id, lang))
-        .unwrap_or(none_word);
+        .unwrap_or("None");
     let season_hint = season_bonus_hint(ov.calendar.season, lang);
     let event_label = ov
         .calendar
         .active_event
         .map(|e| format!("{} ({})", world_event_name(e, lang), event_bonus_hint(e, lang)))
-        .unwrap_or_else(|| none_word.to_string());
-    let cal_info = match lang {
-        Lang::En => format!(
-            "Day **{}** (1 day = 2h) · **{}** *({season_hint})*\nEvent: {} • Trend (+15%): **{}**",
-            ov.calendar.day,
-            season_name(ov.calendar.season, lang),
-            event_label,
-            trend_label
-        ),
-        Lang::Id => format!(
-            "Hari **{}** (1 hari = 2 jam) · **{}** *({season_hint})*\nEvent: {} • Tren (+15%): **{}**",
-            ov.calendar.day,
-            season_name(ov.calendar.season, lang),
-            event_label,
-            trend_label
-        ),
-    };
-
-    let (title, cal_hdr, raw_hdr, crafted_hdr, list_hdr, fee_hdr, fee_val) = match lang {
-        Lang::En => (
-            "🏪 Market & Broker (NPC Market)",
-            "World Calendar",
-            "Raw & Gathering Prices",
-            "Crafted Goods Prices",
-            format!("Active Broker Listings ({}/5)", ov.listings.len()),
-            "Broker Fees",
-            "1% Fee (min 0.50 Bac) + 3% Commission",
-        ),
-        Lang::Id => (
-            "🏪 Pasar & Makelar (NPC Market)",
-            "Kalender Global",
-            "Harga Bahan Mentah",
-            "Harga Barang Olahan",
-            format!("Listing Makelar Aktif ({}/5)", ov.listings.len()),
-            "Biaya Makelar",
-            "Fee 1% (min 0.50 Bac) + Komisi 3%",
-        ),
-    };
+        .unwrap_or_else(|| "None".to_string());
+    let cal_info = format!(
+        "Day **{}** (1 day = 2h) · **{}** *({season_hint})*\nEvent: {} • Trend (+15%): **{}**",
+        ov.calendar.day,
+        season_name(ov.calendar.season, lang),
+        event_label,
+        trend_label
+    );
 
     let mut e = branding::styled_embed(branding::COLOR_ECONOMY)
-        .title(title)
-        .field(cal_hdr, cal_info, false)
-        .field(raw_hdr, raw_lines, false)
-        .field(crafted_hdr, crafted_lines, false)
-        .field(list_hdr, listing_lines, false)
+        .title("🏪 Market & Broker (NPC Market)")
+        .field("World Calendar", cal_info, false)
+        .field("Raw & Gathering Prices", raw_lines, false)
+        .field("Crafted Goods Prices", crafted_lines, false)
+        .field(format!("Active Broker Listings ({}/5)", ov.listings.len()), listing_lines, false)
         .field("Wallet", format!("🪙 {}", format_bac(ov.wallet_balance)), true)
-        .field(fee_hdr, fee_val, true);
+        .field("Broker Fees", "1% Fee (min 0.50 Bac) + 3% Commission", true);
     if let Some(n) = note {
         e = e.description(n);
     }
@@ -580,10 +420,7 @@ pub fn market(ov: &MarketOverview, note: Option<String>, lang: Lang) -> CreateEm
 
 pub fn city(ov: &CityOverview, note: Option<String>, lang: Lang) -> CreateEmbed {
     let facilities = if ov.facilities.is_empty() {
-        match lang {
-            Lang::En => "No facilities built yet.".to_string(),
-            Lang::Id => "Belum ada fasilitas.".to_string(),
-        }
+        "No facilities built yet.".to_string()
     } else {
         ov.facilities
             .iter()
@@ -592,30 +429,12 @@ pub fn city(ov: &CityOverview, note: Option<String>, lang: Lang) -> CreateEmbed 
             .join("\n")
     };
     let running = match &ov.running_project {
-        Some(r) => match lang {
-            Lang::En => format!(
-                "🚧 **{}** — finishes <t:{}:R>",
-                project_name(r.project, lang),
-                r.ends_at.timestamp()
-            ),
-            Lang::Id => format!(
-                "🚧 **{}** — selesai <t:{}:R>",
-                project_name(r.project, lang),
-                r.ends_at.timestamp()
-            ),
-        },
-        None => match lang {
-            Lang::En => "No active project.".to_string(),
-            Lang::Id => "Tidak ada proyek berjalan.".to_string(),
-        },
-    };
-    let min_word = match lang {
-        Lang::En => "min",
-        Lang::Id => "menit",
-    };
-    let max_word = match lang {
-        Lang::En => "Max",
-        Lang::Id => "Maks",
+        Some(r) => format!(
+            "🚧 **{}** — finishes <t:{}:R>",
+            project_name(r.project, lang),
+            r.ends_at.timestamp()
+        ),
+        None => "No active project.".to_string(),
     };
     let projects = ProjectId::ALL
         .iter()
@@ -630,7 +449,7 @@ pub fn city(ov: &CityOverview, note: Option<String>, lang: Lang) -> CreateEmbed 
                 .map(|f| f.level)
                 .unwrap_or(0);
             if cur_lvl >= p.max_level {
-                return Some(format!("✅ **{}** — Lv {} ({max_word})", p_name, cur_lvl));
+                return Some(format!("✅ **{}** — Lv {} (Max)", p_name, cur_lvl));
             }
             if ov.stage < p.min_stage {
                 return None;
@@ -645,7 +464,7 @@ pub fn city(ov: &CityOverview, note: Option<String>, lang: Lang) -> CreateEmbed 
                 .collect::<Vec<_>>()
                 .join(", ");
             Some(format!(
-                "🔨 **{}** (Lv {}) — {} + {} ({} {min_word})\n*{}*",
+                "🔨 **{}** (Lv {}) — {} + {} ({} min)\n*{}*",
                 p_name,
                 next_lvl,
                 format_bac(project_cost_bac_for_level(p, next_lvl)),
@@ -669,57 +488,27 @@ pub fn city(ov: &CityOverview, note: Option<String>, lang: Lang) -> CreateEmbed 
         format!("{}%", ov.yield_bonus_pct)
     };
 
-    let (title, wallet_hdr, econ_hdr, econ_val, fac_hdr, run_hdr, avail_hdr) = match lang {
-        Lang::En => (
-            format!("🗺️ City — {} ({})", stage_name(ov.stage, lang), stage_era(ov.stage, lang)),
-            "Personal Wallet",
-            "City Economy",
-            format!(
-                "Tax: **{}%** • Welfare: **{}%** • Activity Yield Bonus: **{}**\n\
-                 Cashflow / 30m: +{} (tax) − {} (upkeep, {} active crew) = **{}**\n\
-                 *5%/10% keeps Welfare 100%; 15% boosts tax but lowers Welfare to 80%. Projects spend Treasury first.*",
-                ov.tax_rate_pct,
-                ov.welfare,
-                yield_str,
-                format_bac(ov.est_tax_income),
-                format_bac(ov.est_expense),
-                ov.assigned_crews,
-                net_str,
-            ),
-            "Installed Facilities",
-            "Active Project",
-            "Available Projects",
-        ),
-        Lang::Id => (
-            format!("🗺️ Kota — {} ({})", stage_name(ov.stage, lang), stage_era(ov.stage, lang)),
-            "Wallet Pribadi",
-            "Ekonomi Kota",
-            format!(
-                "Pajak: **{}%** • Welfare: **{}%** • Bonus Yield Aktivitas: **{}**\n\
-                 Cashflow / 30m: +{} (pajak) − {} (biaya, {} kru aktif) = **{}**\n\
-                 *Pajak 5%/10% jaga Welfare 100%; 15% pajak besar tapi Welfare turun ke 80%. Proyek memakai Treasury dulu.*",
-                ov.tax_rate_pct,
-                ov.welfare,
-                yield_str,
-                format_bac(ov.est_tax_income),
-                format_bac(ov.est_expense),
-                ov.assigned_crews,
-                net_str,
-            ),
-            "Fasilitas Terpasang",
-            "Proyek Berjalan",
-            "Proyek Tersedia",
-        ),
-    };
+    let econ_val = format!(
+        "Tax: **{}%** • Welfare: **{}%** • Activity Yield Bonus: **{}**\n\
+         Cashflow / 30m: +{} (tax) − {} (upkeep, {} active crew) = **{}**\n\
+         *5%/10% keeps Welfare 100%; 15% boosts tax but lowers Welfare to 80%. Projects spend Treasury first.*",
+        ov.tax_rate_pct,
+        ov.welfare,
+        yield_str,
+        format_bac(ov.est_tax_income),
+        format_bac(ov.est_expense),
+        ov.assigned_crews,
+        net_str,
+    );
 
     let mut e = branding::styled_embed(branding::COLOR_INFRASTRUCTURE)
-        .title(title)
+        .title(format!("🗺️ City — {} ({})", stage_name(ov.stage, lang), stage_era(ov.stage, lang)))
         .field("City Treasury", format!("🏦 {}", format_bac(ov.treasury)), true)
-        .field(wallet_hdr, format!("🪙 {}", format_bac(ov.wallet_balance)), true)
-        .field(econ_hdr, econ_val, false)
-        .field(fac_hdr, facilities, false)
-        .field(run_hdr, running, false)
-        .field(avail_hdr, projects, false);
+        .field("Personal Wallet", format!("🪙 {}", format_bac(ov.wallet_balance)), true)
+        .field("City Economy", econ_val, false)
+        .field("Installed Facilities", facilities, false)
+        .field("Active Project", running, false)
+        .field("Available Projects", projects, false);
     if let Some(n) = note {
         e = e.description(n);
     }
@@ -728,40 +517,24 @@ pub fn city(ov: &CityOverview, note: Option<String>, lang: Lang) -> CreateEmbed 
 
 pub fn craft(ov: &CraftOverview, note: Option<String>, lang: Lang) -> CreateEmbed {
     let running = if ov.running.is_empty() {
-        match lang {
-            Lang::En => "No crafting in progress.".to_string(),
-            Lang::Id => "Tidak ada crafting berjalan.".to_string(),
-        }
+        "No crafting in progress.".to_string()
     } else {
         ov.running
             .iter()
             .map(|r| {
                 let tag = if r.auto_sell { " [Auto-Sell]" } else { "" };
-                match lang {
-                    Lang::En => format!(
-                        "⏳ **{} × {}**{} — finishes <t:{}:R>",
-                        recipe_name(r.recipe.id, lang),
-                        r.quantity,
-                        tag,
-                        r.ends_at.timestamp()
-                    ),
-                    Lang::Id => format!(
-                        "⏳ **{} × {}**{} — selesai <t:{}:R>",
-                        recipe_name(r.recipe.id, lang),
-                        r.quantity,
-                        tag,
-                        r.ends_at.timestamp()
-                    ),
-                }
+                format!(
+                    "⏳ **{} × {}**{} — finishes <t:{}:R>",
+                    recipe_name(r.recipe.id, lang),
+                    r.quantity,
+                    tag,
+                    r.ends_at.timestamp()
+                )
             })
             .collect::<Vec<_>>()
             .join("\n")
     };
 
-    let sec_unit = match lang {
-        Lang::En => "s",
-        Lang::Id => "d",
-    };
     let recipes = RECIPES
         .iter()
         .map(|r| {
@@ -772,7 +545,7 @@ pub fn craft(ov: &CraftOverview, note: Option<String>, lang: Lang) -> CreateEmbe
                 .collect::<Vec<_>>()
                 .join(" + ");
             format!(
-                "{} **{}** `[{}]` — {} ({}{sec_unit})",
+                "{} **{}** `[{}]` — {} ({}s)",
                 item_icon(r.output_item_id),
                 recipe_name(r.id, lang),
                 recipe_tier_name(r.tier, lang),
@@ -784,20 +557,13 @@ pub fn craft(ov: &CraftOverview, note: Option<String>, lang: Lang) -> CreateEmbe
         .join("\n");
 
     let orders = if ov.orders.is_empty() {
-        match lang {
-            Lang::En => "No active orders.".to_string(),
-            Lang::Id => "Belum ada pesanan aktif.".to_string(),
-        }
+        "No active orders.".to_string()
     } else {
         ov.orders
             .iter()
             .map(|o| {
-                let reward_word = match lang {
-                    Lang::En => "reward",
-                    Lang::Id => "hadiah",
-                };
                 format!(
-                    "#{} {} **{} × {}** — {reward_word} **{}** (+{} Rep XP)",
+                    "#{} {} **{} × {}** — reward **{}** (+{} Rep XP)",
                     o.id,
                     item_icon(o.item.id),
                     item_name(o.item.id, lang),
@@ -810,37 +576,17 @@ pub fn craft(ov: &CraftOverview, note: Option<String>, lang: Lang) -> CreateEmbe
             .join("\n")
     };
 
-    let (title, rep_hdr, rep_val, run_hdr, rec_hdr, ord_hdr) = match lang {
-        Lang::En => (
-            "⚒️ Workshop & NPC Orders",
-            "Shop Reputation",
-            format!(
-                "`LV. {:02}` ({}/{} XP) • Order Bonus +{}% • Completed: {}",
-                ov.rep_level, ov.rep_xp, ov.rep_xp_needed, ov.rep_bonus_pct, ov.completed_orders
-            ),
-            format!("Active Crafting (max {})", ov.max_concurrent),
-            "Recipes",
-            "Active NPC Orders",
-        ),
-        Lang::Id => (
-            "⚒️ Workshop & Pesanan NPC",
-            "Reputasi Toko",
-            format!(
-                "`LV. {:02}` ({}/{} XP) • Bonus Order +{}% • Selesai: {}",
-                ov.rep_level, ov.rep_xp, ov.rep_xp_needed, ov.rep_bonus_pct, ov.completed_orders
-            ),
-            format!("Crafting Berjalan (maks {})", ov.max_concurrent),
-            "Resep",
-            "Pesanan NPC Aktif",
-        ),
-    };
+    let rep_val = format!(
+        "`LV. {:02}` ({}/{} XP) • Order Bonus +{}% • Completed: {}",
+        ov.rep_level, ov.rep_xp, ov.rep_xp_needed, ov.rep_bonus_pct, ov.completed_orders
+    );
 
     let mut e = branding::styled_embed(branding::COLOR_ECONOMY)
-        .title(title)
-        .field(rep_hdr, rep_val, false)
-        .field(run_hdr, running, false)
-        .field(rec_hdr, recipes, false)
-        .field(ord_hdr, orders, false);
+        .title("⚒️ Workshop & NPC Orders")
+        .field("Shop Reputation", rep_val, false)
+        .field(format!("Active Crafting (max {})", ov.max_concurrent), running, false)
+        .field("Recipes", recipes, false)
+        .field("Active NPC Orders", orders, false);
     if let Some(n) = note {
         e = e.description(n);
     }
@@ -849,10 +595,8 @@ pub fn craft(ov: &CraftOverview, note: Option<String>, lang: Lang) -> CreateEmbe
 
 pub fn crew(crews: &[CrewView], note: Option<String>, lang: Lang) -> CreateEmbed {
     let list = if crews.is_empty() {
-        match lang {
-            Lang::En => "No crew members yet. Hire crew for Efficiency, Yield, Luck bonuses and activity automation!".to_string(),
-            Lang::Id => "Belum ada kru. Rekrut kru untuk bonus Efficiency, Yield, Luck, dan otomasi aktivitas!".to_string(),
-        }
+        "No crew members yet. Hire crew for Efficiency, Yield, Luck bonuses and activity automation!"
+            .to_string()
     } else {
         crews
             .iter()
@@ -860,57 +604,32 @@ pub fn crew(crews: &[CrewView], note: Option<String>, lang: Lang) -> CreateEmbed
                 let task = match c.assigned {
                     Some(a) if c.auto_enabled => format!("{} `[AUTO]`", activity_name(a, lang)),
                     Some(a) => activity_name(a, lang).to_string(),
-                    None => match lang {
-                        Lang::En => "Idle".to_string(),
-                        Lang::Id => "Menganggur".to_string(),
-                    },
+                    None => "Idle".to_string(),
                 };
                 let upg = c
                     .upgrade_cost
                     .map(|u| format!("Upgrade: {}", format_bac(u)))
-                    .unwrap_or_else(|| match lang {
-                        Lang::En => "Max Lv".to_string(),
-                        Lang::Id => "Maks Lv".to_string(),
-                    });
-                match lang {
-                    Lang::En => format!(
-                        "#{} **{}** `[{} LV. {:02}]` — Specialist: {}\nTask: {} • Eff +{}% / Yield +{}% / Luck +{}% • {}",
-                        c.id,
-                        c.name,
-                        c.rarity,
-                        c.level,
-                        activity_name(c.specialty, lang),
-                        task,
-                        c.bonus.efficiency_pct,
-                        c.bonus.yield_pct,
-                        c.bonus.luck_pct,
-                        upg
-                    ),
-                    Lang::Id => format!(
-                        "#{} **{}** `[{} LV. {:02}]` — Spesialis: {}\nTugas: {} • Eff +{}% / Yield +{}% / Luck +{}% • {}",
-                        c.id,
-                        c.name,
-                        c.rarity,
-                        c.level,
-                        activity_name(c.specialty, lang),
-                        task,
-                        c.bonus.efficiency_pct,
-                        c.bonus.yield_pct,
-                        c.bonus.luck_pct,
-                        upg
-                    ),
-                }
+                    .unwrap_or_else(|| "Max Lv".to_string());
+                format!(
+                    "#{} **{}** `[{} LV. {:02}]` — Specialist: {}\nTask: {} • Eff +{}% / Yield +{}% / Luck +{}% • {}",
+                    c.id,
+                    c.name,
+                    c.rarity,
+                    c.level,
+                    activity_name(c.specialty, lang),
+                    task,
+                    c.bonus.efficiency_pct,
+                    c.bonus.yield_pct,
+                    c.bonus.luck_pct,
+                    upg
+                )
             })
             .collect::<Vec<_>>()
             .join("\n\n")
     };
-    let (title, hdr) = match lang {
-        Lang::En => (format!("👥 Crew & Automation ({}/4)", crews.len()), "Crew Roster"),
-        Lang::Id => (format!("👥 Kru & Automasi ({}/4)", crews.len()), "Daftar Kru"),
-    };
     let mut e = branding::styled_embed(branding::COLOR_SOCIAL)
-        .title(title)
-        .field(hdr, list, false);
+        .title(format!("👥 Crew & Automation ({}/4)", crews.len()))
+        .field("Crew Roster", list, false);
     if let Some(n) = note {
         e = e.description(n);
     }
@@ -939,16 +658,14 @@ mod tests {
             })
             .collect();
 
-        for lang in [Lang::En, Lang::Id] {
-            let (raw, crafted) = split_market_price_fields(&views, lang);
-            assert!(raw.len() <= 1024, "raw price field too long ({}): {}", raw.len(), raw);
-            assert!(
-                crafted.len() <= 1024,
-                "crafted price field too long ({}): {}",
-                crafted.len(),
-                crafted
-            );
-        }
+        let (raw, crafted) = split_market_price_fields(&views, Lang::En);
+        assert!(raw.len() <= 1024, "raw price field too long ({}): {}", raw.len(), raw);
+        assert!(
+            crafted.len() <= 1024,
+            "crafted price field too long ({}): {}",
+            crafted.len(),
+            crafted
+        );
     }
 }
 
@@ -960,25 +677,17 @@ pub fn craft_item(
 ) -> CreateEmbed {
     let r_name = recipe_name(recipe.id, lang);
     let tier = recipe_tier_name(recipe.tier, lang);
-    let sec_unit = match lang {
-        Lang::En => "s",
-        Lang::Id => "d",
-    };
     let inputs = recipe
         .inputs
         .iter()
         .map(|(id, need)| {
             let have = stock.get(id).copied().unwrap_or(0);
             format!(
-                "{} **{}**: {} / {} {}",
+                "{} **{}**: {} / {} per unit",
                 item_icon(id),
                 item_name(id, lang),
                 have,
-                need,
-                match lang {
-                    Lang::En => "per unit",
-                    Lang::Id => "per unit",
-                }
+                need
             )
         })
         .collect::<Vec<_>>()
@@ -988,26 +697,13 @@ pub fn craft_item(
     let d5 = batch_duration_secs(recipe.duration_secs, 5);
     let d10 = batch_duration_secs(recipe.duration_secs, 10);
 
-    let (title, ing_hdr, est_hdr, est_val, max_line) = match lang {
-        Lang::En => (
-            format!("{} Craft {} [{}]", item_icon(recipe.output_item_id), r_name, tier),
-            "Required Materials (Owned / Need)",
-            "Batch Craft Duration",
-            format!("×1: **{d1}{sec_unit}** • ×5: **{d5}{sec_unit}** • ×10: **{d10}{sec_unit}**"),
-            format!("Max craftable right now: **{max_batch}**"),
-        ),
-        Lang::Id => (
-            format!("{} Craft {} [{}]", item_icon(recipe.output_item_id), r_name, tier),
-            "Bahan Dibutuhkan (Punya / Butuh)",
-            "Estimasi Durasi Batch",
-            format!("×1: **{d1}{sec_unit}** • ×5: **{d5}{sec_unit}** • ×10: **{d10}{sec_unit}**"),
-            format!("Maksimal bisa dibuat sekarang: **{max_batch}**"),
-        ),
-    };
-
     branding::styled_embed(branding::COLOR_ECONOMY)
-        .title(title)
-        .description(max_line)
-        .field(ing_hdr, inputs, false)
-        .field(est_hdr, est_val, false)
+        .title(format!("{} Craft {} [{}]", item_icon(recipe.output_item_id), r_name, tier))
+        .description(format!("Max craftable right now: **{max_batch}**"))
+        .field("Required Materials (Owned / Need)", inputs, false)
+        .field(
+            "Batch Craft Duration",
+            format!("×1: **{d1}s** • ×5: **{d5}s** • ×10: **{d10}s**"),
+            false,
+        )
 }

@@ -10,9 +10,9 @@ pub enum ApplyOutcome {
 
 #[derive(Debug, thiserror::Error)]
 pub enum WalletError {
-    #[error("saldo Bac tidak cukup")]
+    #[error("Insufficient Bac balance")]
     InsufficientFunds,
-    #[error("wallet tidak ditemukan")]
+    #[error("Wallet not found")]
     NotFound,
     #[error(transparent)]
     Db(#[from] sqlx::Error),

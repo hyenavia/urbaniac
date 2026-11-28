@@ -57,7 +57,7 @@ export function connectEventStream(
                   const parsed = JSON.parse(raw) as RealtimeEvent;
                   onEvent(parsed);
                 } catch {
-                  // Abaikan frame non-JSON
+                  // Ignore non-JSON frames
                 }
               }
             }

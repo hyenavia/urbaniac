@@ -11,7 +11,6 @@ import {
   mockRefreshOrders,
   mockRegister,
   mockSellToNpc,
-  mockSetLang,
   mockSetTaxRate,
   mockStartActivity,
   mockStartCraft,
@@ -44,7 +43,6 @@ import type {
   ProjectQuoteResponse,
   RegisterResponse,
   RunningProjectDto,
-  SetLangResponse,
   SetTaxResponse,
   TreasuryBalanceResponse,
 } from "./types";
@@ -56,15 +54,25 @@ export function newRequestId(): string {
   return `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-async function parseError(res: Response, path: string): Promise<Error> {
-  let msg = `Request ${path} gagal (HTTP ${res.status})`;
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+async function parseError(res: Response, path: string): Promise<ApiError> {
+  let msg = `Request ${path} failed (HTTP ${res.status})`;
   try {
     const body = (await res.json()) as { error?: { message?: string } };
     if (body.error?.message) msg = body.error.message;
   } catch {
-    // Abaikan body non-JSON
+    // Ignore non-JSON body
   }
-  return new Error(msg);
+  return new ApiError(msg, res.status);
 }
 
 async function apiGet<T>(path: string, accessToken: string): Promise<T> {
@@ -153,15 +161,6 @@ export async function registerPlayer(
 ): Promise<RegisterResponse> {
   if (session.mode === "mock") return mockRegister(mockPreset);
   return apiPost<RegisterResponse>("/api/player/register", session.accessToken);
-}
-
-export async function setPlayerLang(
-  session: AuthSession,
-  mockPreset: MockPreset,
-  lang?: "en" | "id",
-): Promise<SetLangResponse> {
-  if (session.mode === "mock") return mockSetLang(mockPreset, lang);
-  return apiPost<SetLangResponse>("/api/player/lang", session.accessToken, { lang });
 }
 
 export async function startActivity(

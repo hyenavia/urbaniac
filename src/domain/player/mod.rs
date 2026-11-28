@@ -15,7 +15,7 @@ pub struct Player {
 
 impl Player {
     pub fn language(&self) -> Lang {
-        Lang::parse(&self.lang)
+        Lang::En
     }
 }
 

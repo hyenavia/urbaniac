@@ -74,7 +74,7 @@ async fn require_registered_lang(state: &WebState, player_id: i64) -> Result<Lan
     let Some(p) = player::get_player(&state.pool, player_id).await? else {
         return Err(ApiError::not_found(
             "not_registered",
-            "Player profile not found. Run /start first.",
+            "Player profile not found. Register first in the Urbaniac Activity.",
         ));
     };
     Ok(p.language())
@@ -293,24 +293,12 @@ pub async fn register_player(
 pub async fn set_player_lang(
     State(state): State<Arc<WebState>>,
     auth: AuthUser,
-    Json(req): Json<SetLangRequest>,
+    Json(_req): Json<SetLangRequest>,
 ) -> Result<Json<SetLangResponse>, ApiError> {
     require_registered_lang(&state, auth.user_id).await?;
-    let next = match req.lang.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        Some(raw) => {
-            let parsed = match raw.to_ascii_lowercase().as_str() {
-                "en" => Lang::En,
-                "id" => Lang::Id,
-                _ => return Err(ApiError::bad_request("invalid_lang", "Supported lang: 'en' or 'id'")),
-            };
-            player::set_lang(&state.pool, auth.user_id, parsed).await?;
-            parsed
-        }
-        None => player::toggle_lang(&state.pool, auth.user_id).await?,
-    };
     Ok(Json(SetLangResponse {
-        lang: next.as_str(),
-        label: next.label(),
+        lang: Lang::En.as_str(),
+        label: Lang::En.label(),
     }))
 }
 
@@ -342,6 +330,9 @@ pub async fn me(
         username: auth.username,
         avatar_url: auth.avatar_url,
         profile,
+        voice_boost_active: state.voice_boost.is_boosted(auth.user_id),
+        voice_boost_speed_pct: state.voice_boost.speed_bonus_pct(auth.user_id),
+        voice_boost_xp_pct: state.voice_boost.xp_bonus_pct(auth.user_id),
     }))
 }
 
@@ -863,12 +854,14 @@ pub async fn start_crafting(
 ) -> Result<Json<CraftRunDto>, ApiError> {
     let lang = require_registered_lang(&state, auth.user_id).await?;
     let batch_qty = req.batch_qty.unwrap_or(1);
-    let run = crafting::start_craft_batch(
+    let voice_spd = state.voice_boost.speed_bonus_pct(auth.user_id);
+    let run = crafting::start_craft_batch_with_bonus(
         &state.pool,
         auth.user_id,
         req.recipe_id.trim(),
         batch_qty,
         state.activity_duration_pct,
+        voice_spd,
     )
     .await
     .map_err(|e| map_craft_error(e, lang))?;
@@ -899,7 +892,8 @@ pub async fn fulfill_crafting_order(
     Json(req): Json<FulfillOrderRequest>,
 ) -> Result<Json<FulfillOrderResponse>, ApiError> {
     let lang = require_registered_lang(&state, auth.user_id).await?;
-    let sum = crafting::fulfill_order(&state.pool, auth.user_id, req.order_id)
+    let xp_bonus = state.voice_boost.xp_bonus_pct(auth.user_id);
+    let sum = crafting::fulfill_order_with_xp_bonus(&state.pool, auth.user_id, req.order_id, xp_bonus)
         .await
         .map_err(|e| map_craft_error(e, lang))?;
     Ok(Json(FulfillOrderResponse {
@@ -1083,8 +1077,15 @@ pub async fn start_activity(
         ApiError::bad_request("unknown_activity", format!("Unknown activity: {}", req.kind))
     })?;
 
-    let run = activities::start(&state.pool, auth.user_id, kind, state.activity_duration_pct)
-        .await
+    let voice_spd = state.voice_boost.speed_bonus_pct(auth.user_id);
+    let run = activities::start_with_bonus(
+        &state.pool,
+        auth.user_id,
+        kind,
+        state.activity_duration_pct,
+        voice_spd,
+    )
+    .await
         .map_err(|e| map_activity_error(e, lang))?;
     state.notify.notify_one();
 
@@ -1102,7 +1103,8 @@ pub async fn collect_activities(
     auth: AuthUser,
 ) -> Result<Json<CollectActivitiesResponse>, ApiError> {
     let lang = require_registered_lang(&state, auth.user_id).await?;
-    let summaries = activities::collect_ready(&state.pool, auth.user_id).await?;
+    let xp_bonus = state.voice_boost.xp_bonus_pct(auth.user_id);
+    let summaries = activities::collect_ready_with_xp_bonus(&state.pool, auth.user_id, xp_bonus).await?;
     let collected = summaries
         .into_iter()
         .map(|s| CollectedRunDto {

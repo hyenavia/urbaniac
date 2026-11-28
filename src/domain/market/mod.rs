@@ -51,9 +51,9 @@ impl ListingDuration {
 
     pub fn label(&self) -> &'static str {
         match self {
-            ListingDuration::Short => "2 Jam",
-            ListingDuration::Medium => "6 Jam",
-            ListingDuration::Long => "24 Jam",
+            ListingDuration::Short => "2 Hours",
+            ListingDuration::Medium => "6 Hours",
+            ListingDuration::Long => "24 Hours",
         }
     }
 }

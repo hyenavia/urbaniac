@@ -36,28 +36,28 @@ pub const BASE_SLOT_CAPACITY: i64 = 12;
 
 pub const ITEMS: &[ItemDef] = &[
     // Raw
-    ItemDef { id: "wheat", name: "Gandum", rarity: Rarity::Common, npc_price_cents: 300 },
-    ItemDef { id: "potato", name: "Kentang", rarity: Rarity::Common, npc_price_cents: 400 },
-    ItemDef { id: "wood", name: "Kayu", rarity: Rarity::Common, npc_price_cents: 300 },
-    ItemDef { id: "berries", name: "Buah Hutan", rarity: Rarity::Common, npc_price_cents: 350 },
-    ItemDef { id: "wild_herb", name: "Herba Liar", rarity: Rarity::Uncommon, npc_price_cents: 1200 },
+    ItemDef { id: "wheat", name: "Wheat", rarity: Rarity::Common, npc_price_cents: 300 },
+    ItemDef { id: "potato", name: "Potato", rarity: Rarity::Common, npc_price_cents: 400 },
+    ItemDef { id: "wood", name: "Wood", rarity: Rarity::Common, npc_price_cents: 300 },
+    ItemDef { id: "berries", name: "Forest Berries", rarity: Rarity::Common, npc_price_cents: 350 },
+    ItemDef { id: "wild_herb", name: "Wild Herb", rarity: Rarity::Uncommon, npc_price_cents: 1200 },
     // Processed
-    ItemDef { id: "flour", name: "Tepung Gandum", rarity: Rarity::Common, npc_price_cents: 950 },
-    ItemDef { id: "plank", name: "Papan Kayu", rarity: Rarity::Common, npc_price_cents: 950 },
-    ItemDef { id: "herb_extract", name: "Ekstrak Herba", rarity: Rarity::Uncommon, npc_price_cents: 4000 },
+    ItemDef { id: "flour", name: "Wheat Flour", rarity: Rarity::Common, npc_price_cents: 950 },
+    ItemDef { id: "plank", name: "Wood Plank", rarity: Rarity::Common, npc_price_cents: 950 },
+    ItemDef { id: "herb_extract", name: "Herb Extract", rarity: Rarity::Uncommon, npc_price_cents: 4000 },
     // Finished
-    ItemDef { id: "bread", name: "Roti Kampung", rarity: Rarity::Common, npc_price_cents: 2800 },
-    ItemDef { id: "wooden_crate", name: "Peti Kayu", rarity: Rarity::Uncommon, npc_price_cents: 3200 },
-    ItemDef { id: "healing_tonic", name: "Tonik Herba", rarity: Rarity::Rare, npc_price_cents: 6800 },
-    // Fishing (Desa)
-    ItemDef { id: "river_fish", name: "Ikan Sungai", rarity: Rarity::Common, npc_price_cents: 500 },
-    ItemDef { id: "silver_carp", name: "Gurame Perak", rarity: Rarity::Uncommon, npc_price_cents: 1600 },
-    ItemDef { id: "golden_eel", name: "Belut Emas", rarity: Rarity::Rare, npc_price_cents: 4500 },
-    // Mining (Kota Kecil)
-    ItemDef { id: "stone", name: "Batu", rarity: Rarity::Common, npc_price_cents: 450 },
-    ItemDef { id: "iron_ore", name: "Bijih Besi", rarity: Rarity::Uncommon, npc_price_cents: 1800 },
-    ItemDef { id: "amethyst", name: "Kecubung", rarity: Rarity::Rare, npc_price_cents: 6000 },
-    ItemDef { id: "star_crystal", name: "Kristal Bintang", rarity: Rarity::Epic, npc_price_cents: 15000 },
+    ItemDef { id: "bread", name: "Village Bread", rarity: Rarity::Common, npc_price_cents: 2800 },
+    ItemDef { id: "wooden_crate", name: "Wooden Crate", rarity: Rarity::Uncommon, npc_price_cents: 3200 },
+    ItemDef { id: "healing_tonic", name: "Herbal Tonic", rarity: Rarity::Rare, npc_price_cents: 6800 },
+    // Fishing (Village)
+    ItemDef { id: "river_fish", name: "River Fish", rarity: Rarity::Common, npc_price_cents: 500 },
+    ItemDef { id: "silver_carp", name: "Silver Carp", rarity: Rarity::Uncommon, npc_price_cents: 1600 },
+    ItemDef { id: "golden_eel", name: "Golden Eel", rarity: Rarity::Rare, npc_price_cents: 4500 },
+    // Mining (Town)
+    ItemDef { id: "stone", name: "Stone", rarity: Rarity::Common, npc_price_cents: 450 },
+    ItemDef { id: "iron_ore", name: "Iron Ore", rarity: Rarity::Uncommon, npc_price_cents: 1800 },
+    ItemDef { id: "amethyst", name: "Amethyst", rarity: Rarity::Rare, npc_price_cents: 6000 },
+    ItemDef { id: "star_crystal", name: "Star Crystal", rarity: Rarity::Epic, npc_price_cents: 15000 },
 ];
 
 pub fn find_item(id: &str) -> Option<&'static ItemDef> {
