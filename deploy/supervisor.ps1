@@ -239,10 +239,11 @@ function Download-FileAtomic([string]$Uri, [string]$DestPath, [int]$TimeoutSec) 
 function Get-ExpectedSha256([string]$SumFile, [string]$FileName) {
     if (-not (Test-Path $SumFile)) { return $null }
     $escaped = [regex]::Escape($FileName)
+    $pattern = "^\s*([0-9a-fA-F]{64})\s+\*?$escaped\s*$"
     $sumLine = Get-Content $SumFile |
-        Where-Object { $_ -match $escaped } |
+        Where-Object { $_ -match $pattern } |
         Select-Object -First 1
-    if (-not $sumLine -or $sumLine -notmatch "^\s*([0-9a-fA-F]{64})\s+\*?$escaped\s*$") {
+    if (-not $sumLine -or $sumLine -notmatch $pattern) {
         return $null
     }
     return $Matches[1].ToLowerInvariant()
@@ -374,12 +375,9 @@ function Get-AssetUrl($Release, [string]$Name) {
 
 function Get-VerifiedCandidate([string]$Commit) {
     $short = $Commit.Substring(0, 7)
-    $stageDir = Join-Path $DeployRoot ("deploy-" + $short)
-    $releaseDir = Join-Path $stageDir "release"
-    $candidateExe = Join-Path $releaseDir "urbaniac.exe"
     $downloadDir = Join-Path $DownloadRoot $Commit
 
-    New-Item -ItemType Directory -Force -Path $releaseDir, $downloadDir | Out-Null
+    New-Item -ItemType Directory -Force -Path $downloadDir | Out-Null
 
     $release = Get-ReleaseAssets $Commit
     if (-not $release) {
@@ -410,9 +408,15 @@ function Get-VerifiedCandidate([string]$Commit) {
     Download-FileAtomic $manifestUrl $downloadManifest 60
 
     $expectedExeHash = Get-ExpectedSha256 $downloadSum "urbaniac.exe"
+
     if (-not $expectedExeHash) {
         throw [System.IO.InvalidDataException]::new("SHA256SUMS.txt has an invalid format for urbaniac.exe ($short).")
     }
+
+    # Immutable executable directory: never overwrite a running executable.
+    $stageDir = Join-Path $DeployRoot ("deploy-" + $short + "-" + $expectedExeHash.Substring(0, 12))
+    $releaseDir = Join-Path $stageDir "release"
+    $candidateExe = Join-Path $releaseDir "urbaniac.exe"
 
     $expectedFeHash = Get-ExpectedSha256 $downloadFeSum "frontend-dist.zip"
     if (-not $expectedFeHash) {
@@ -463,7 +467,40 @@ function Get-VerifiedCandidate([string]$Commit) {
         }
     }
 
-    Copy-Item $downloadExe $candidateExe -Force | Out-Null
+    New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
+    if (-not (Test-Sha256 $candidateExe $expectedExeHash)) {
+        $candidateTemp = "$candidateExe.download"
+        Remove-Item $candidateTemp -Force -ErrorAction SilentlyContinue | Out-Null
+        try {
+            Copy-Item $downloadExe $candidateTemp -Force | Out-Null
+
+            if (-not (Test-Sha256 $candidateTemp $expectedExeHash)) {
+                throw [System.IO.InvalidDataException]::new("Candidate executable verification failed ($short).")
+            }
+
+            $candidateFullPath = [System.IO.Path]::GetFullPath($candidateExe)
+            $runningAtCandidate = @(Get-BotProcesses | Where-Object {
+                $_.ExecutablePath -and
+                [string]::Equals(
+                    [System.IO.Path]::GetFullPath($_.ExecutablePath),
+                    $candidateFullPath,
+                    [System.StringComparison]::OrdinalIgnoreCase
+                )
+            })
+            if ($runningAtCandidate.Count -gt 0) {
+                throw "Refusing to overwrite running executable at $candidateExe."
+            }
+
+            Invoke-WithRetry {
+                Move-Item -Path $candidateTemp -Destination $candidateExe -Force | Out-Null
+            } | Out-Null
+        }
+        catch {
+            Remove-Item $candidateTemp -Force -ErrorAction SilentlyContinue | Out-Null
+            throw
+        }
+    }
+
     Write-Log "Assets downloaded, manifest cross-checked, and SHA-256 verified for commit $short."
 
     return [PSCustomObject]@{
@@ -705,7 +742,7 @@ function Start-Bot([string]$ExePath, [switch]$AllowDegradedActivity) {
     if ($AllowDegradedActivity) {
         Write-Log "WARNING: Bot connected to Discord, but Activity Web API failed at $($activityCfg.HealthUrl). Keeping bot online in degraded mode."
         if (-not $script:ActivityDegradedAlerted) {
-            Send-DiscordNotification "$IconWarn **URBANIAC ACTIVITY DEGRADED**`nBot is online on Discord, but Activity Web API failed `/api/health` at `$($activityCfg.BindAddr)`."
+            Send-DiscordNotification "$IconWarn **URBANIAC ACTIVITY DEGRADED**`nBot is online on Discord, but Activity Web API failed ``/api/health`` at ``$($activityCfg.BindAddr)``."
             $script:ActivityDegradedAlerted = $true
         }
         if ((Get-CurrentUtc) -ge $script:NextActivityRecoveryAt) {
@@ -815,7 +852,7 @@ function Invoke-ControlledHealthRecovery([switch]$IsStartup) {
             Write-Log "Controlled recovery could not stop running bot cleanly: $($_.Exception.Message)"
             $activityCfg = Get-ActivityHealthConfig
             if (-not $script:ActivityDegradedAlerted) {
-                Send-DiscordNotification "$IconWarn **URBANIAC ACTIVITY DEGRADED**`nBot is online on Discord, but Activity Web API failed `/api/health` at `$($activityCfg.BindAddr)`."
+                Send-DiscordNotification "$IconWarn **URBANIAC ACTIVITY DEGRADED**`nBot is online on Discord, but Activity Web API failed ``/api/health`` at ``$($activityCfg.BindAddr)``."
                 $script:ActivityDegradedAlerted = $true
             }
             if ((Get-CurrentUtc) -ge $script:NextActivityRecoveryAt) {
